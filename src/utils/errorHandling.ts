@@ -19,7 +19,7 @@ export function showErrorAlert(title: string, error: unknown): void {
 /**
  * Logs an error to console with appropriate formatting, sanitizing sensitive data
  */
-export function logError(context: string, error: unknown): void {
+export function logError(context: string, error: unknown, additionalInfo: any = {}): void {
   // Sanitize error object to remove sensitive data
   const sanitizedError = JSON.parse(JSON.stringify(error, (key, value) => {
     if (['accessToken', 'refreshToken', 'account_number', 'sort_code', 'account_holder_name', 'email', 'phone'].includes(key)) {
@@ -28,9 +28,13 @@ export function logError(context: string, error: unknown): void {
     return value;
   }));
 
-  // Log the sanitized error
-  const message = getErrorMessage(error);
-  console.error(`[${context}] Error: ${typeof error === 'string' ? message : JSON.stringify(sanitizedError)}`);
+  // Combine error message with additional info
+  const errorDetails = {
+    message: getErrorMessage(error),
+    ...additionalInfo,
+  };
+
+  console.error(`[${context}] Error: ${JSON.stringify(sanitizedError)}`, errorDetails);
 
   // Optionally send to a secure logging service (e.g., Sentry)
   // Sentry.captureException(sanitizedError, { tags: { context } });

@@ -143,7 +143,7 @@ const LinkedBanksScreen: React.FC<LinkedBanksScreenProps> = ({ navigation }) => 
       )}
       <TouchableOpacity
         style={styles.addBankButton}
-        onPress={() => navigation.navigate('BankAuth')}
+        onPress={() => navigation.navigate('BankAuthScreen')}
       >
         <Icon name="add" size={20} color="#fff" style={styles.addBankIcon} />
         <Text style={styles.addBankButtonText}>Link New Bank</Text>

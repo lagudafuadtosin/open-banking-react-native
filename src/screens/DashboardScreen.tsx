@@ -7,12 +7,14 @@ import {
   ScrollView,
   RefreshControl,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import { AuthContext } from '../context/AuthContext';
 import { syncService } from '../services/syncService';
-import { BankAccount, Balance } from '../services/trueLayerService';
+import { trueLayerService, BankAccount, Balance } from '../services/trueLayerService';
+import { cacheService } from '../services/cacheService';
 
 type DashboardScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Dashboard'>;
 
@@ -30,41 +32,119 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [totalBalance, setTotalBalance] = useState(0);
   const [currency, setCurrency] = useState('GBP');
-  
-  const loadAccounts = async () => {
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadAttempts, setLoadAttempts] = useState(0);
+
+  // Enhanced account loading with retry logic
+  const checkTokensAndLoadAccounts = async () => {
     try {
-      const accountsWithBalance = await syncService.getAccounts();
-      
-      setAccounts(accountsWithBalance);
-      
-      // Calculate total balance (assuming all accounts use the same currency for simplicity)
-      const total = accountsWithBalance.reduce((sum, account) => {
-        return sum + (account.balance?.available ?? 0);
-      }, 0);
-      
-      setTotalBalance(total);
-      
-      // Set currency from the first account with a balance
-      const firstBalance = accountsWithBalance.find(acc => acc.balance)?.balance;
-      if (firstBalance?.currency) {
-        setCurrency(firstBalance.currency);
+      setIsLoading(true);
+      // First check if we have an access token
+      const token = await trueLayerService.getAccessToken();
+      if (!token) {
+        console.log('No access token available, navigating to ConnectBank');
+        navigation.navigate('ConnectBank');
+        return;
+      }
+
+      // Use the existing syncService to get accounts with balances
+      try {
+        const accountsWithBalance = await syncService.getAccounts();
+        
+        if (accountsWithBalance && accountsWithBalance.length > 0) {
+          setAccounts(accountsWithBalance);
+
+          const total = accountsWithBalance.reduce((sum, account) => {
+            return sum + (account.balance?.available ?? 0);
+          }, 0);
+          setTotalBalance(total);
+
+          const firstBalance = accountsWithBalance.find(acc => acc.balance)?.balance;
+          if (firstBalance?.currency) {
+            setCurrency(firstBalance.currency);
+          }
+        } else {
+          throw new Error('No accounts found');
+        }
+      } catch (error: any) {
+        console.error('Error loading accounts:', error);
+        
+        // Check if we have any cached accounts to show instead
+        const cachedAccounts = await cacheService.getCache<AccountWithBalance[]>('accounts');
+        
+        if (cachedAccounts && cachedAccounts.length > 0) {
+          console.log('Loading accounts from cache as fallback');
+          setAccounts(cachedAccounts);
+          
+          const total = cachedAccounts.reduce((sum, account) => {
+            return sum + (account.balance?.available ?? 0);
+          }, 0);
+          setTotalBalance(total);
+          
+          const firstBalance = cachedAccounts.find(acc => acc.balance)?.balance;
+          if (firstBalance?.currency) {
+            setCurrency(firstBalance.currency);
+          }
+          
+          // Show a message that we're using cached data
+          Alert.alert(
+            'Using Cached Data',
+            'Unable to connect to the bank. Showing your last synced accounts.',
+            [{ text: 'OK' }]
+          );
+        } else if (error.message && error.message.includes('Please connect a bank first')) {
+          // If there's a specific error about connecting a bank, navigate to ConnectBank
+          navigation.navigate('ConnectBank');
+        } else {
+          // No cached data and not a "connect bank" error
+          if (loadAttempts < 2) {
+            // Try one more time after a delay
+            setTimeout(() => {
+              setLoadAttempts(prev => prev + 1);
+              checkTokensAndLoadAccounts();
+            }, 2000);
+          } else {
+            // After retries, show an error
+            Alert.alert(
+              'Connection Error',
+              'Could not load your accounts. Please try again later.',
+              [
+                { 
+                  text: 'Try Again', 
+                  onPress: () => {
+                    setLoadAttempts(0);
+                    checkTokensAndLoadAccounts();
+                  }
+                },
+                { 
+                  text: 'Connect Bank', 
+                  onPress: () => navigation.navigate('ConnectBank')
+                }
+              ]
+            );
+          }
+        }
       }
     } catch (error: any) {
-      console.error('Error loading accounts:', error);
+      console.error('Error in checkTokensAndLoadAccounts:', error);
       Alert.alert('Error', 'Failed to load your accounts. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
-  
+
   useEffect(() => {
-    loadAccounts();
-  }, []);
-  
+    if (user) {
+      checkTokensAndLoadAccounts();
+    }
+  }, [user]);
+
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadAccounts();
+    await checkTokensAndLoadAccounts();
     setRefreshing(false);
   };
-  
+
   const handleLogout = async () => {
     try {
       await logout();
@@ -73,14 +153,23 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
       Alert.alert('Error', 'Failed to log out. Please try again.');
     }
   };
-  
+
   const formatCurrency = (amount: number, currency: string) => {
     return new Intl.NumberFormat('en-GB', {
       style: 'currency',
       currency: currency || 'GBP',
     }).format(amount);
   };
-  
+
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#1a73e8" />
+        <Text style={styles.loadingText}>Loading accounts...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -97,7 +186,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
           </TouchableOpacity>
         </View>
       </View>
-      
+
       <ScrollView
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
@@ -109,7 +198,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
             {formatCurrency(totalBalance, currency)}
           </Text>
         </View>
-        
+
         <View style={styles.accountsSection}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Your Accounts</Text>
@@ -117,7 +206,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
               <Text style={styles.addButton}>+ Add</Text>
             </TouchableOpacity>
           </View>
-          
+
           {accounts.length === 0 ? (
             <View style={styles.emptyState}>
               <Text style={styles.emptyStateText}>
@@ -164,7 +253,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
             ))
           )}
         </View>
-        
+
         <View style={styles.actionsSection}>
           <TouchableOpacity
             style={styles.actionButton}
@@ -172,7 +261,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
           >
             <Text style={styles.actionButtonText}>Make a Payment</Text>
           </TouchableOpacity>
-          
+
           <TouchableOpacity
             style={[styles.actionButton, styles.secondaryButton]}
             onPress={() => navigation.navigate('Accounts')}
@@ -189,6 +278,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+  },
+  loadingText: {
+    marginTop: 10,
+    color: '#5f6368',
+    fontSize: 16,
   },
   header: {
     flexDirection: 'row',
@@ -326,10 +426,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#5f6368',
     marginTop: 2,
-  },
-  loadingText: {
-    color: '#5f6368',
-    fontSize: 14,
   },
   actionsSection: {
     padding: 20,

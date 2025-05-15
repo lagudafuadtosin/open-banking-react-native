@@ -5,9 +5,19 @@ import CryptoJS from 'react-native-crypto-js';
 export class EncryptionService {
   private encryptionKey: string | null = null;
   private readonly keyStorageKey = 'encryptionKey';
+  private initPromise: Promise<void>;
 
   constructor() {
-    this.initialize();
+    // Initialize immediately and store the promise for later use
+    this.initPromise = this.initialize();
+  }
+
+  /**
+   * Method to ensure initialization is complete
+   * Other methods can await this before proceeding
+   */
+  async ensureInitialized(): Promise<void> {
+    return this.initPromise;
   }
 
   /**
@@ -26,7 +36,8 @@ export class EncryptionService {
       }
     } catch (error) {
       logError('EncryptionService.initialize', error);
-      throw error;
+      // Don't throw here, just log the error
+      // This allows the service to be used even if initialization fails
     }
   }
 
@@ -37,6 +48,9 @@ export class EncryptionService {
    */
   async encrypt(data: string): Promise<string | null> {
     try {
+      // Ensure initialization is complete before proceeding
+      await this.ensureInitialized();
+      
       if (!this.encryptionKey) {
         throw new Error('Encryption key not initialized');
       }
@@ -54,6 +68,9 @@ export class EncryptionService {
    */
   async decrypt(encryptedData: string): Promise<string | null> {
     try {
+      // Ensure initialization is complete before proceeding
+      await this.ensureInitialized();
+      
       if (!this.encryptionKey) {
         throw new Error('Encryption key not initialized');
       }

@@ -7,6 +7,8 @@ import { biometricService } from '../services/biometricService';
 import { logError } from '../utils/errorHandling';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSessionTimeout } from '../hooks/useSessionTimeout';
+import { navigate } from '../navigation'; // Import navigate utility
+import { trueLayerService } from '../services/trueLayerService'; // Import trueLayerService
 
 // Use the imported AuthContextProps type
 export const AuthContext = createContext<AuthContextProps>({
@@ -167,6 +169,28 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       throw error;
     }
   };
+
+  // Check bank authentication and navigate if token exists
+  const checkBankAuth = async () => {
+    try {
+      if (user) {
+        const token = await trueLayerService.getAccessToken();
+        if (token) {
+          console.log('Bank token detected, navigating to Dashboard');
+          navigate('Dashboard'); // Use the navigate utility
+        } else {
+          console.log('No bank token available');
+        }
+      }
+    } catch (error) {
+      console.error('Error checking bank auth:', error);
+    }
+  };
+
+  // Run checkBankAuth when user state changes
+  useEffect(() => {
+    checkBankAuth();
+  }, [user]);
 
   return (
     <AuthContext.Provider

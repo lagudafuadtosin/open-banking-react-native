@@ -1,9 +1,10 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { networkService, NetworkStatus } from '../services/networkService'; // Updated import
+import { networkService, NetworkStatus } from '../services/networkService';
 import { syncService } from '../services/syncService';
 import { cacheService } from '../services/cacheService';
 import { Alert } from 'react-native';
 import { logError } from '../utils/errorHandling';
+import { AuthContext } from '../context/AuthContext';
 
 interface OfflineContextProps {
   isOffline: boolean;
@@ -27,36 +28,36 @@ export const OfflineContext = createContext<OfflineContextProps>({
 });
 
 export const OfflineProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useContext(AuthContext);
   const [networkStatus, setNetworkStatus] = useState<NetworkStatus>(networkService.getCurrentStatus());
   const [hasCachedData, setHasCachedData] = useState(false);
   const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
   const [wasOffline, setWasOffline] = useState(false);
-  
+
   // Check for cached data on mount
   useEffect(() => {
     checkCachedData();
   }, []);
-  
+
   // Subscribe to network status updates
   useEffect(() => {
     const listener = (status: NetworkStatus) => {
       setNetworkStatus(status);
     };
-    
+
     networkService.addListener(listener);
-    
+
     return () => {
       networkService.removeListener(listener);
     };
   }, []);
-  
+
   // Monitor network status changes
   useEffect(() => {
     const isCurrentlyOffline = !networkStatus.isConnected || !networkStatus.isInternetReachable;
-    
+
     // If we were offline but now online, we need to sync
     if (wasOffline && !isCurrentlyOffline) {
-      // Show reconnection message
       Alert.alert(
         'Connection Restored',
         'You are back online. Tap Sync to update your data.',
@@ -72,47 +73,42 @@ export const OfflineProvider: React.FC<{ children: React.ReactNode }> = ({ child
         ]
       );
     }
-    
+
     setWasOffline(isCurrentlyOffline);
-  }, [networkStatus, wasOffline]); // Depend on networkStatus and wasOffline
-  
+  }, [networkStatus, wasOffline]);
+
   // Check if we have any cached data
   const checkCachedData = async () => {
     try {
-      // Check for accounts cache
       const cachedAccounts = await cacheService.getCache('accounts');
-      
-      // Get sync status with proper typing
       const syncStatus = await cacheService.getCache<SyncStatus>('syncStatus');
       if (syncStatus && syncStatus.lastSync) {
         setLastSyncTime(syncStatus.lastSync);
       }
-      
       setHasCachedData(!!cachedAccounts);
     } catch (error) {
       logError('OfflineContext.checkCachedData', error);
     }
   };
-  
+
   // Sync data when coming back online
   const syncOnReconnect = async () => {
     try {
-      // This would ideally use the user's ID from auth context
-      // For now, using a placeholder
-      await syncService.syncAccounts('current_user_id');
-      
-      // Update last sync time
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
+      await syncService.syncAccounts(user.uid);
+
       const syncStatus = syncService.getSyncStatus();
       setLastSyncTime(syncStatus.lastSync);
-      
-      // Check cached data again
+
       await checkCachedData();
     } catch (error) {
       logError('OfflineContext.syncOnReconnect', error);
       Alert.alert('Sync Failed', 'There was a problem syncing your data.');
     }
   };
-  
+
   return (
     <OfflineContext.Provider
       value={{

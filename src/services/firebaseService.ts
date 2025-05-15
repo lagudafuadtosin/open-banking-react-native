@@ -1,6 +1,7 @@
 import firestore from '@react-native-firebase/firestore';
 import { encryptionService } from './encryptionService';
 import { logError } from '../utils/errorHandling';
+import auth from '@react-native-firebase/auth'; // Explicitly import auth for getCurrentUserId
 
 // Define types for Firestore data
 interface UserProfileData {
@@ -40,6 +41,12 @@ import { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
 
 export class FirebaseService {
   private db = firestore();
+
+  // Add getCurrentUserId method
+  getCurrentUserId(): string | null {
+    const user = auth().currentUser;
+    return user ? user.uid : null;
+  }
 
   async saveUserProfile(user: {
     uid: string;
