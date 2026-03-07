@@ -7,6 +7,7 @@ const config = {
       /android\/build/,
       /android\/app\/build/,
     ],
+      
   },
 };
 

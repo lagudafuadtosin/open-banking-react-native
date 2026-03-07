@@ -7,11 +7,17 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
+  Image,
+  StatusBar,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
 } from 'react-native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import { AuthContext } from '../context/AuthContext';
 import { logError, showErrorAlert } from '../utils/errorHandling';
+import COLORS from '../constants/colors';
 
 type LoginScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Login'>;
 
@@ -27,6 +33,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
   
   const { login, authenticateWithBiometrics } = useContext(AuthContext);
 
+  // Simple email format validation
   const validateEmail = (email: string): boolean => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
@@ -48,7 +55,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
       await login(email, password);
     } catch (error: any) {
       logError('Login', error);
-      showErrorAlert('Login Failed', error);
+      Alert.alert('Login Failed', 'Invalid email or password. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -59,102 +66,150 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
       setIsBiometricLoading(true);
       const authenticated = await authenticateWithBiometrics();
       if (authenticated) {
-        // Navigation will happen in AuthContext
+        // Navigation handled inside AuthContext
       }
     } catch (error: any) {
       logError('BiometricLogin', error);
-      showErrorAlert('Biometric Authentication Failed', error);
     } finally {
       setIsBiometricLoading(false);
     }
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Open Banking App</Text>
-      <Text style={styles.subtitle}>Powered by TrueLayer</Text>
+    <KeyboardAvoidingView 
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={styles.keyboardAvoidView}
+    >
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.white} />
       
-      <View style={styles.formContainer}>
-        <TextInput
-          style={styles.input}
-          placeholder="Email"
-          value={email}
-          onChangeText={setEmail}
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
-        
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
-        
-        <TouchableOpacity 
-          style={styles.loginButton}
-          onPress={handleLogin}
-          disabled={isLoading}
-        >
-          {isLoading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.loginButtonText}>Login</Text>
-          )}
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.biometricButton}
-          onPress={handleBiometricLogin}
-          disabled={isBiometricLoading}
-        >
-          {isBiometricLoading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.biometricButtonText}>Login with Biometrics</Text>
-          )}
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          onPress={() => navigation.navigate('Register')}
-        >
-          <Text style={styles.registerText}>Don't have an account? Register</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+      <ScrollView 
+        contentContainerStyle={styles.scrollView}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.container}>
+          <Image
+            source={require('../../assets/banks/blogo.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          
+          <Text style={styles.title}>FuadBank 335</Text>
+          <Text style={styles.subtitle}>Powered by TrueLayer</Text>
+          
+          <View style={styles.formContainer}>
+            <TextInput
+              style={{
+                height: 50,
+                borderWidth: 1,
+                borderColor: '#E0E0E0',
+                borderRadius: 8,
+                marginBottom: 15,
+                paddingHorizontal: 15,
+                backgroundColor: '#FFFFFF',
+                color: '#000000',
+                fontSize: 16,
+              }}
+              placeholder="Email"
+              placeholderTextColor="#999999"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+            
+            <TextInput
+              style={{
+                height: 50,
+                borderWidth: 1,
+                borderColor: '#E0E0E0',
+                borderRadius: 8,
+                marginBottom: 15,
+                paddingHorizontal: 15,
+                backgroundColor: '#FFFFFF',
+                color: '#000000',
+                fontSize: 16,
+              }}
+              placeholder="Password"
+              placeholderTextColor="#999999"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+            />
+            
+            <TouchableOpacity 
+              style={styles.loginButton}
+              onPress={handleLogin}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <ActivityIndicator color={COLORS.white} />
+              ) : (
+                <Text style={styles.loginButtonText}>Login</Text>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.biometricButton}
+              onPress={handleBiometricLogin}
+              disabled={isBiometricLoading}
+            >
+              {isBiometricLoading ? (
+                <ActivityIndicator color={COLORS.white} />
+              ) : (
+                <Text style={styles.biometricButtonText}>Login with Biometrics</Text>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity onPress={() => navigation.navigate('Register')}>
+              <Text style={styles.registerText}>Don't have an account? Register</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
+  keyboardAvoidView: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+  },
+  scrollView: {
+    flexGrow: 1,
+  },
   container: {
     flex: 1,
     justifyContent: 'center',
+    alignItems: 'center',
     padding: 20,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: COLORS.white,
+  },
+  logo: {
+    width: 100,
+    height: 100,
+    marginBottom: 20,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 10,
-    color: '#1a73e8',
+    color: COLORS.primary,
   },
   subtitle: {
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 30,
-    color: '#5f6368',
+    color: COLORS.gray,
   },
   formContainer: {
-    backgroundColor: '#fff',
+    width: '100%',
+    backgroundColor: COLORS.white,
     padding: 20,
     borderRadius: 10,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
@@ -162,14 +217,18 @@ const styles = StyleSheet.create({
   input: {
     height: 50,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.border,
     borderRadius: 8,
     marginBottom: 15,
     paddingHorizontal: 15,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: COLORS.lightGray,
+    color: '#000000',
+    placeholderTextColor: '#999999',
+    selectionColor: '#000000',
+    underlineColorAndroid: 'transparent',
   },
   loginButton: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: COLORS.primary,
     height: 50,
     borderRadius: 8,
     justifyContent: 'center',
@@ -177,12 +236,12 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   loginButtonText: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: 16,
     fontWeight: 'bold',
   },
   biometricButton: {
-    backgroundColor: '#34a853',
+    backgroundColor: COLORS.secondary,
     height: 50,
     borderRadius: 8,
     justifyContent: 'center',
@@ -190,12 +249,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   biometricButtonText: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: 16,
     fontWeight: 'bold',
   },
   registerText: {
-    color: '#1a73e8',
+    color: COLORS.primary,
     textAlign: 'center',
     fontSize: 14,
   },

@@ -11,9 +11,8 @@ interface CachedItem<T> {
 }
 
 export class CacheService {
-  /**
-   * Set item in cache
-   */
+  // Set item in cache
+
   async setCache<T>(key: string, data: T, options: CacheOptions = {}): Promise<void> {
     try {
       const cachedItem: CachedItem<T> = {
@@ -28,10 +27,9 @@ export class CacheService {
     }
   }
   
-  /**
-   * Get item from cache
-   * Returns null if item doesn't exist or has expired
-   */
+  // Get item from cache
+  // Returns null if item doesn't exist or has expired
+  
   async getCache<T>(key: string, options: CacheOptions = {}): Promise<T | null> {
     try {
       const serialized = await AsyncStorage.getItem(`cache_${key}`);
@@ -59,9 +57,8 @@ export class CacheService {
     }
   }
   
-  /**
-   * Remove item from cache
-   */
+  // Remove item from cache
+   
   async removeCache(key: string): Promise<void> {
     try {
       await AsyncStorage.removeItem(`cache_${key}`);
@@ -70,25 +67,31 @@ export class CacheService {
     }
   }
   
-  /**
-   * Clear a specific cache entry (alias for removeCache)
-   */
+  // Clear a specific cache entry (I do not think I need this, consider clean up)
+
   async clearCache(key: string): Promise<void> {
     await this.removeCache(key);
   }
   
-  /**
-   * Clear all cached items
-   */
+  // Clear all cached items to solve logout issue
+
   async clearAllCache(): Promise<void> {
-    try {
-      const keys = await AsyncStorage.getAllKeys();
-      const cacheKeys = keys.filter(key => key.startsWith('cache_'));
-      await AsyncStorage.multiRemove(cacheKeys);
-    } catch (error) {
-      logError('CacheService.clearAllCache', error);
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    console.log('All keys found:', keys.length);
+    const cacheKeys = keys.filter(key => key.startsWith('cache_'));
+    console.log('Cache keys to remove:', cacheKeys.length);
+    
+    for (const key of cacheKeys) {
+      await AsyncStorage.removeItem(key);
+      console.log('Removed key:', key);
     }
+    console.log('Cache clearing completed');
+  } catch (error) {
+    console.log('Cache clearing failed:', error);
+    logError('CacheService.clearAllCache', error);
   }
+}
 }
 
 export const cacheService = new CacheService();

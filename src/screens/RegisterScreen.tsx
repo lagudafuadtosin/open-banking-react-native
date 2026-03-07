@@ -13,6 +13,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import { AuthContext } from '../context/AuthContext';
 import { logError, showErrorAlert } from '../utils/errorHandling';
+import COLORS from '../constants/colors';
 
 type RegisterScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Register'>;
 
@@ -70,8 +71,8 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
       setIsLoading(true);
       await register(email, password, name);
     } catch (error: any) {
-      logError('Registration', error);
-      showErrorAlert('Registration Failed', error);
+      logError('RegisterScreen.register', error);
+      Alert.alert('Registration Failed', 'Unable to create account. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -85,33 +86,77 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
         
         <View style={styles.formContainer}>
           <TextInput
-            style={styles.input}
+            style={{
+              height: 50,
+              borderWidth: 1,
+              borderColor: '#E0E0E0',
+              borderRadius: 8,
+              marginBottom: 15,
+              paddingHorizontal: 15,
+              backgroundColor: '#FFFFFF',
+              color: '#000000',
+              fontSize: 16,
+            }}
             placeholder="Full Name"
+            placeholderTextColor="#999999"
             value={name}
             onChangeText={setName}
             autoCapitalize="words"
           />
-          
+
           <TextInput
-            style={styles.input}
+            style={{
+              height: 50,
+              borderWidth: 1,
+              borderColor: '#E0E0E0',
+              borderRadius: 8,
+              marginBottom: 15,
+              paddingHorizontal: 15,
+              backgroundColor: '#FFFFFF',
+              color: '#000000',
+              fontSize: 16,
+            }}
             placeholder="Email"
+            placeholderTextColor="#999999"
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
             autoCapitalize="none"
           />
-          
+
           <TextInput
-            style={styles.input}
+            style={{
+              height: 50,
+              borderWidth: 1,
+              borderColor: '#E0E0E0',
+              borderRadius: 8,
+              marginBottom: 15,
+              paddingHorizontal: 15,
+              backgroundColor: '#FFFFFF',
+              color: '#000000',
+              fontSize: 16,
+            }}
             placeholder="Password"
+            placeholderTextColor="#999999"
             value={password}
             onChangeText={setPassword}
             secureTextEntry
           />
-          
+
           <TextInput
-            style={styles.input}
+            style={{
+              height: 50,
+              borderWidth: 1,
+              borderColor: '#E0E0E0',
+              borderRadius: 8,
+              marginBottom: 15,
+              paddingHorizontal: 15,
+              backgroundColor: '#FFFFFF',
+              color: '#000000',
+              fontSize: 16,
+            }}
             placeholder="Confirm Password"
+            placeholderTextColor="#999999"
             value={confirmPassword}
             onChangeText={setConfirmPassword}
             secureTextEntry
@@ -123,7 +168,7 @@ const RegisterScreen: React.FC<RegisterScreenProps> = ({ navigation }) => {
             disabled={isLoading}
           >
             {isLoading ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={COLORS.white} />
             ) : (
               <Text style={styles.registerButtonText}>Register</Text>
             )}
@@ -148,26 +193,26 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     padding: 20,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: COLORS.lightGray,
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
     textAlign: 'center',
     marginBottom: 10,
-    color: '#1a73e8',
+    color: COLORS.primary,
   },
   subtitle: {
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 30,
-    color: '#5f6368',
+    color: COLORS.gray,
   },
   formContainer: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
     padding: 20,
     borderRadius: 10,
-    shadowColor: '#000',
+    shadowColor: COLORS.black,
     shadowOffset: {
       width: 0,
       height: 2,
@@ -179,14 +224,18 @@ const styles = StyleSheet.create({
   input: {
     height: 50,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: COLORS.border,
     borderRadius: 8,
     marginBottom: 15,
     paddingHorizontal: 15,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: COLORS.lightGray,
+    color: '#000000',
+    placeholderTextColor: '#999999',
+    selectionColor: '#000000',
+    underlineColorAndroid: 'transparent',
   },
   registerButton: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: COLORS.primary,
     height: 50,
     borderRadius: 8,
     justifyContent: 'center',
@@ -194,12 +243,12 @@ const styles = StyleSheet.create({
     marginBottom: 15,
   },
   registerButtonText: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: 16,
     fontWeight: 'bold',
   },
   loginText: {
-    color: '#1a73e8',
+    color: COLORS.primary,
     textAlign: 'center',
     fontSize: 14,
   },

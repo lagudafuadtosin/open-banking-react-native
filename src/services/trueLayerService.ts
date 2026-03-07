@@ -1,11 +1,13 @@
-import axios from 'axios';
-import { TRUELAYER_CLIENT_ID, TRUELAYER_CLIENT_SECRET, TRUELAYER_REDIRECT_URI, API_URL } from '@env';
-import { logError } from '../utils/errorHandling';
+import axios, { AxiosError } from 'axios';
+import { TRUELAYER_CLIENT_ID, TRUELAYER_CLIENT_SECRET, TRUELAYER_REDIRECT_URI, API_URL, TRUELAYER_PRIVATE_KEY_ID, TRUELAYER_PRIVATE_KEY } from '@env';
+import { logError, getErrorMessage  } from '../utils/errorHandling';
 import { secureStorage } from './secureStorage';
 import { firebaseService } from './firebaseService';
 import { encryptionService } from './encryptionService';
+import { decode as base64Decode } from 'base-64';
+import { v4 as uuidv4 } from 'uuid';
 
-// Define types
+// Basic types needed
 export interface BankAccount {
   account_id: string;
   institution_id: string;
@@ -34,22 +36,36 @@ export interface Transaction {
 }
 
 export interface PaymentStatus {
-  status: 'AuthorizationRequired' | 'Initiated' | 'Settled' | 'Failed';
+  status: 'authorization_required' | 'authorizing' | 'authorized' | 'executed' | 'settled' | 'failed';
   payment_id: string;
 }
 
+interface PaymentProgress {
+  paymentId: string;
+  createdAt: number;
+  currentStatus: 'AuthorizationRequired' | 'Initiated' | 'Settled' | 'Failed';
+}
+
+
+const userId = uuidv4();
+const shortRef = `Pay-${userId.slice(0, 10)}`; // Shortened to ~13 chars (Pay- + first 10 of UUID)
+
 export class TrueLayerService {
   private accessToken: string | null = null;
-  private refreshToken: string | null = null;
   private dataApiUrl = 'https://api.truelayer-sandbox.com';
   private authApiUrl = 'https://auth.truelayer-sandbox.com';
   private connectTokenUrl = 'https://auth.truelayer-sandbox.com/connect/token';
-  private requestTimeout = 30000; // 30 seconds
+  private requestTimeout = 30000; // 30 seconds timeout for requests
+  private paymentProgressMap: Map<string, PaymentProgress> = new Map();
 
   constructor() {
     this.loadTokens();
   }
+  // start of generate signature
+  // Moved everything here to server-side, deleted no point not working
+  // end of generate signature
 
+  // Initialize the service
   async initSDK(): Promise<void> {
     try {
       await this.loadTokens();
@@ -60,6 +76,7 @@ export class TrueLayerService {
     }
   }
 
+  // Helper for making secure API calls
   private async secureFetch(url: string, options: any = {}): Promise<any> {
     try {
       const config = {
@@ -71,7 +88,7 @@ export class TrueLayerService {
         },
       };
 
-      // Handle different body content types
+      // Handle form data vs JSON body
       if (options.body) {
         if (options.headers && options.headers['Content-Type'] === 'application/x-www-form-urlencoded') {
           const formData = new URLSearchParams();
@@ -90,7 +107,6 @@ export class TrueLayerService {
         }
       }
 
-      // For debugging
       console.log(`Making request to ${url}`, {
         method: options.method,
         headers: config.headers,
@@ -109,7 +125,7 @@ export class TrueLayerService {
 
       logError('TrueLayerService.secureFetch', error, errorDetails);
 
-      // Rethrow with more context
+      // Better error message
       if (error.response) {
         throw new Error(`API Error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
       }
@@ -117,63 +133,42 @@ export class TrueLayerService {
     }
   }
 
+  // Load tokens from storage
   private async loadTokens(): Promise<void> {
     try {
       const accessToken = await secureStorage.getItem('tl_access_token');
-      const refreshToken = await secureStorage.getItem('tl_refresh_token');
 
       if (accessToken) console.log('Access token loaded from storage');
-      if (refreshToken) console.log('Refresh token loaded from storage');
 
       this.accessToken = accessToken;
-      this.refreshToken = refreshToken;
-
-      // If we have an access token but no refresh token, this is an issue
-      // that will prevent token refresh, so warn about it
-      if (accessToken && !refreshToken) {
-        console.warn('WARNING: Access token found but no refresh token. Token renewal will not work.');
-      }
     } catch (error) {
       logError('TrueLayerService.loadTokens', error);
       throw error;
     }
   }
 
+  // Get a valid access token
   async getAccessToken(): Promise<string | null> {
     try {
-      // If we don't have an access token but have a refresh token, try to refresh
-      if (!this.accessToken && this.refreshToken) {
-        try {
-          await this.refreshAccessToken();
-        } catch (error) {
-          console.error('Failed to refresh access token:', error);
-          return null;
-        }
-      }
-
+    
       if (!this.accessToken) {
-        // We don't have a token and couldn't refresh
+        console.log('getAccessToken called - checking memory token:', !!this.accessToken);
+        const storedToken = await secureStorage.getItem('tl_access_token');
+        console.log('Retrieving from storage:', !!storedToken);
+        this.accessToken = storedToken;
         return null;
       }
 
-      // Check if token is expired by decoding it (optional JWT check)
+      // Check if token expired
       const tokenParts = this.accessToken.split('.');
       if (tokenParts.length === 3) {
         try {
-          const payload = JSON.parse(atob(tokenParts[1]));
-          const expiry = payload.exp * 1000; // Convert to milliseconds
+          const payload = JSON.parse(base64Decode(tokenParts[1]));
+          const expiry = payload.exp * 1000; // Milliseconds
 
-          if (expiry < Date.now()) {
-            console.log('Token is expired, attempting refresh');
-            if (this.refreshToken) {
-              await this.refreshAccessToken();
-            } else {
-              console.error('Cannot refresh expired token - no refresh token available');
-              return null;
-            }
-          }
+         
         } catch (e) {
-          console.warn('Could not decode token to check expiry');
+          logError('TrueLayerService.getAccessToken', 'Error parsing token payload', { error: e })
         }
       }
 
@@ -184,141 +179,81 @@ export class TrueLayerService {
     }
   }
 
-  private async refreshAccessToken(): Promise<void> {
+    // Clear all tokens and reset service state
+  async clearTokens(): Promise<void> {
     try {
-      if (!this.refreshToken) {
-        console.warn('Cannot refresh token - no refresh token available');
-        this.accessToken = null;
-        await secureStorage.removeItem('tl_access_token');
-        throw new Error('No refresh token available. Please reconnect the bank.');
-      }
-
-      console.log('Attempting to refresh access token');
-
-      const requestBody = new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: TRUELAYER_CLIENT_ID,
-        client_secret: TRUELAYER_CLIENT_SECRET,
-        refresh_token: this.refreshToken,
-      }).toString();
-
-      // Use axios directly for better control over content type
-      const response = await axios({
-        method: 'POST',
-        url: this.connectTokenUrl,
-        data: requestBody,
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        timeout: this.requestTimeout,
-      });
-
-      // Log the response for debugging
-      console.log('Refresh token response:', JSON.stringify({
-        status: response.status,
-        data: response.data ? Object.keys(response.data) : 'No data',
-      }));
-
-      if (!response.data) {
-        throw new Error('Refresh token response is empty');
-      }
-
-      // Access token is required for refresh
-      if (!response.data.access_token) {
-        throw new Error('Refresh token response missing access_token');
-      }
-
-      this.accessToken = response.data.access_token;
-      console.log('Access token refreshed successfully');
-
-      // Save the new access token
-      if (this.accessToken) {
-        await secureStorage.setItem('tl_access_token', this.accessToken);
-      }
-
-      // Some OAuth providers don't return a new refresh token every time,
-      // but if they do, we should save it
-      if (response.data.refresh_token) {
-        this.refreshToken = response.data.refresh_token;
-        console.log('Refresh token also updated');
-        if (this.refreshToken) {
-          await secureStorage.setItem('tl_refresh_token', this.refreshToken);
-        }
-      }
-    } catch (error) {
-      logError('TrueLayerService.refreshAccessToken', error);
-
-      // Clear the tokens if refresh failed
+      console.log('Clearing TrueLayer tokens and service state');
+      
+      // Clear in-memory token
       this.accessToken = null;
-      this.refreshToken = null;
+      
+      // Clear tokens from secure storage
       await secureStorage.removeItem('tl_access_token');
       await secureStorage.removeItem('tl_refresh_token');
-
-      throw new Error('Failed to refresh access token. Please reconnect the bank.');
+      
+      // Clear payment progress map
+      this.paymentProgressMap.clear();
+      
+      console.log('TrueLayer tokens cleared successfully');
+    } catch (error) {
+      logError('TrueLayerService.clearTokens', error);
+      throw error;
     }
   }
-
+  // Store tokens in Firebase for cross-device access
   private async saveTokensToFirebase(userId: string, institutionId: string, institutionName: string): Promise<void> {
     try {
-      // Only require access token to save to Firebase (refresh is optional)
       if (!this.accessToken) {
         throw new Error('No access token available to save.');
       }
 
       try {
-        // First try to save the bank connection normally
         await firebaseService.saveBankConnection(userId, {
           institutionId,
           institutionName,
           accessToken: this.accessToken,
-          refreshToken: this.refreshToken || '',
+          refreshToken: '',
         });
 
         console.log('Tokens saved to Firebase successfully');
       } catch (error) {
-        // If it's an encryption error, try to ensure encryption service is initialized
+        // Try to fix encryption errors
         if (error instanceof Error && error.message.includes('encrypt')) {
-          console.warn('Encryption error detected when saving to Firebase, attempting to reinitialize encryption service');
+          logError('TrueLayerService.saveTokensToFirebase', 'Encryption error detected when saving to Firebase, attempting to reinitialize encryption service');
 
-          // Try to explicitly initialize encryption service
           try {
             await encryptionService.ensureInitialized();
 
-            // Try again with reinitialized encryption service
             await firebaseService.saveBankConnection(userId, {
               institutionId,
               institutionName,
               accessToken: this.accessToken,
-              refreshToken: this.refreshToken || '',
+              refreshToken: '',
             });
 
             console.log('Tokens saved to Firebase successfully after reinitializing encryption');
           } catch (secondError) {
-            console.warn('Still unable to save tokens to Firebase after reinitializing encryption:', secondError);
-            // Don't throw, just continue with the flow
+            logError('TrueLayerService.saveTokensToFirebase', 'Still unable to save tokens to Firebase after reinitializing encryption', { error: secondError });
           }
         } else {
-          // For other types of errors, just log and continue
-          console.warn('Non-encryption error when saving to Firebase:', error);
+          logError('TrueLayerService.saveTokensToFirebase', new Error('Could not save tokens to Firebase. This may affect syncing across devices.'), error);
         }
       }
     } catch (error) {
-      // Log but don't throw the error to allow authentication flow to continue
-      console.warn('Could not save tokens to Firebase. This may affect syncing across devices:', error);
+      logError('TrueLayerService.saveTokensToFirebase', 'Could not save tokens to Firebase. This may affect syncing across devices', { error });
     }
   }
 
+  // Extract the authorization code from callback URL
   async handleRedirectUri(uri: string): Promise<string> {
     try {
       console.log('Handling redirect URI:', uri);
 
-      // Extract the query string from the URI
       const queryString = uri.split('?')[1];
       if (!queryString) {
         throw new Error('No query string found in redirect URI');
       }
 
-      // Parse the query string manually to ensure it works correctly
       const params = queryString.split('&').reduce((result: Record<string, string>, param) => {
         const [key, value] = param.split('=');
         if (key && value) {
@@ -347,6 +282,7 @@ export class TrueLayerService {
     }
   }
 
+  // Exchange auth code for access token
   async exchangeCodeForToken(code: string, userId: string, institutionId: string, institutionName: string): Promise<void> {
     try {
       console.log('Exchanging code for token with code:', code.substring(0, 10) + '...');
@@ -361,7 +297,6 @@ export class TrueLayerService {
 
       console.log('Using redirect URI:', TRUELAYER_REDIRECT_URI);
 
-      // Make the request with increased timeout
       try {
         const response = await axios({
           method: 'POST',
@@ -370,47 +305,31 @@ export class TrueLayerService {
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
           },
-          timeout: 60000,
+          timeout: 60000, // Longer timeout for token exchange
         });
 
-        // Log the response for debugging
-        console.log('Token exchange response status:', response.status);
         console.log('Token exchange response keys:', response.data ? Object.keys(response.data) : 'No data');
 
-        // Check for any response data
         if (!response.data) {
           throw new Error('Token exchange returned empty response');
         }
 
-        // Check for access token - this is required
         if (!response.data.access_token) {
           throw new Error('Token exchange response missing access_token');
         }
 
-        // Store the access token
         this.accessToken = response.data.access_token;
         console.log('Access token received successfully');
+        
 
-        // Store it in secure storage - with null check
         if (this.accessToken) {
           await secureStorage.setItem('tl_access_token', this.accessToken);
+          
+           const storedToken = await secureStorage.getItem('tl_access_token');
+          console.log('Verification - token stored successfully:', !!storedToken);
         }
 
-        // Refresh token is optional but preferred
-        if (response.data.refresh_token) {
-          this.refreshToken = response.data.refresh_token;
-          console.log('Refresh token received successfully');
-
-          // Add null check before storing
-          if (this.refreshToken) {
-            await secureStorage.setItem('tl_refresh_token', this.refreshToken);
-          }
-        } else {
-          console.warn('No refresh token received from TrueLayer. Token renewal will be limited.');
-          this.refreshToken = null;
-        }
-
-        // Now save to Firebase with retries
+        // Try to save to Firebase a few times
         let retries = 3;
         let success = false;
 
@@ -420,28 +339,25 @@ export class TrueLayerService {
             console.log('Tokens saved to Firebase');
             success = true;
           } catch (error) {
-            console.error(`Failed to save tokens to Firebase (attempt ${4-retries}/3):`, error);
+            logError('TrueLayerService.exchangeCodeForToken', `Failed to save tokens to Firebase (attempt ${4-retries}/3)`, { error });
             retries--;
             if (retries > 0) {
-              // Wait before retrying
               await new Promise(resolve => setTimeout(resolve, 1000));
             }
           }
         }
 
         if (!success) {
-          console.warn('Could not save tokens to Firebase after multiple attempts');
+          logError('TrueLayerService.exchangeCodeForToken', 'Could not save tokens to Firebase after multiple attempts');
         }
 
         console.log('Token exchange and storage completed');
       } catch (error: any) {
-        // Handle Axios errors
-        console.error('Token exchange request failed:', error.message);
-
-        if (error.response) {
-          console.error('Response status:', error.response.status);
-          console.error('Response data:', JSON.stringify(error.response.data));
-        }
+        logError('TrueLayerService.exchangeCodeForToken', 'Token exchange request failed', { 
+          message: error.message,
+          status: error.response?.status,
+          data: error.response?.data 
+        });
 
         throw new Error(`Token exchange failed: ${error.message}`);
       }
@@ -451,15 +367,14 @@ export class TrueLayerService {
     }
   }
 
+  // Make authenticated API calls
   async authenticatedFetch(url: string, options: any = {}): Promise<any> {
     try {
-      // Make sure we have a token
       const token = await this.getAccessToken();
       if (!token) {
         throw new Error('No access token available. Please connect a bank first.');
       }
 
-      // Add token to headers
       const authOptions = {
         ...options,
         headers: {
@@ -468,31 +383,14 @@ export class TrueLayerService {
         },
       };
 
-      try {
-        // Attempt the request
-        return await this.secureFetch(url, authOptions);
-      } catch (error: any) {
-        // If token expired and we have a refresh token, try refreshing and retrying
-        if (error.response?.status === 401 && this.refreshToken) {
-          console.log('Token expired, refreshing and retrying request');
-          await this.refreshAccessToken();
-
-          // Update auth header with new token
-          if (this.accessToken) {
-            authOptions.headers.Authorization = `Bearer ${this.accessToken}`;
-
-            // Retry the request
-            return await this.secureFetch(url, authOptions);
-          }
-        }
-        throw error;
-      }
+      return await this.secureFetch(url, authOptions);
     } catch (error) {
       logError(`TrueLayerService.authenticatedFetch to ${url}`, error);
       throw error;
     }
   }
 
+  // Get all user accounts
   async getAccounts(): Promise<BankAccount[]> {
     try {
       console.log('Fetching accounts');
@@ -522,16 +420,16 @@ export class TrueLayerService {
     } catch (error) {
       logError('TrueLayerService.getAccounts', error);
 
-      // If no accounts or error, try using mock data in development
-      if (__DEV__) {
+      // Use mock data in dev mode
         console.log('Using mock accounts as fallback');
         return this.getMockAccounts();
-      }
+  
 
       throw error;
     }
   }
 
+  // Get balances for accounts
   async getBalances(accountIds: string[]): Promise<{ [accountId: string]: Balance }> {
     try {
       const token = await this.getAccessToken();
@@ -554,7 +452,7 @@ export class TrueLayerService {
           });
 
           if (!response.results || !Array.isArray(response.results) || response.results.length === 0) {
-            console.warn(`Invalid balance data format for account ${accountId}`);
+            logError('TrueLayerService.getBalances', `Invalid balance data format for account ${accountId}`);
             continue;
           }
 
@@ -567,8 +465,8 @@ export class TrueLayerService {
 
           console.log(`Retrieved balance for account ${accountId}: ${balances[accountId].available} ${balances[accountId].currency}`);
         } catch (error: any) {
-          console.warn(`Error fetching balance for account ${accountId}:`, error);
-          // Continue with other accounts even if one fails
+          logError('TrueLayerService.getBalances', `Error fetching balance for account ${accountId}`, { accountId, error });
+          // Keep going with other accounts
         }
       }
 
@@ -579,6 +477,7 @@ export class TrueLayerService {
     }
   }
 
+  // Get transactions for a date range
   async getTransactions(accountId: string, fromDate: string, toDate: string): Promise<Transaction[]> {
     try {
       const response = await this.authenticatedFetch(
@@ -610,46 +509,136 @@ export class TrueLayerService {
       throw error;
     }
   }
+  
 
-  async initiatePayment(paymentRequest: any): Promise<{ paymentId: string; resourceToken: string }> {
+  // Former Fake payment initiation for sandbox, changed to real see backup
+async initiatePayment(paymentRequest: {
+      amount: number;
+      currency: string;
+      accountIdentifier: string;
+      recipient: {
+        name: string;
+        account_number: string;
+        sort_code: string;
+      };
+      user: {
+        id?: string;
+        name: string;
+        email: string;
+      };
+    }): Promise<{ paymentId: string; authUrl: string; status: string; resourceToken: string }> {
     try {
-      // Mock implementation for sandbox
-      const paymentId = `payment-${Date.now()}`;
-      const resourceToken = `token-${Date.now()}`;
+      const token = await this.getAccessToken();
+      if (!token) {
+        throw new Error('No access token available. Please connect a bank first.');
+      }
 
-      // In a real implementation, we would call the TrueLayer payments API
+          const paymentBody = {
+          amount_in_minor: Math.round(paymentRequest.amount * 100),
+          currency: paymentRequest.currency,
+          payment_method: {
+            type: 'bank_transfer',
+            provider_selection: {
+              type: 'user_selected',
+              filter: {
+                countries: ['GB'],
+                release_channel: 'general_availability',
+              },
+              scheme_selection: {
+                type: 'instant_only',
+                allow_remitter_fee: false,
+              },
+            },
+            beneficiary: {
+              type: 'external_account',
+              account_holder_name: paymentRequest.recipient.name,
+              account_identifier: {
+                type: 'sort_code_account_number',
+                sort_code: paymentRequest.recipient.sort_code,
+                account_number: paymentRequest.recipient.account_number,
+              },
+              reference: shortRef,
+            },
+          },
+          user: {
+            id: userId,
+            name: paymentRequest.user.name,
+            email: paymentRequest.user.email,
+          },
+          redirect: {
+            return_uri: TRUELAYER_REDIRECT_URI, // Changed from redirect_uri
+          },
+        };
 
-      return { paymentId, resourceToken };
+      const idempotencyKey = `payment-${Date.now()}-${userId.slice(0, 8)}`;
+      const bodyString = JSON.stringify(paymentBody);
+
+      const response = await axios.post('https://truelayer-server.onrender.com/api/truelayer-request', {
+            url: `${this.dataApiUrl}/v3/payments`,
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: paymentBody,
+        idempotencyKey,
+      });
+
+      console.log('Full payment response:', response.data); // Log full response for debugging
+
+      if (!response.data.id) {
+        throw new Error('Invalid payment initiation response: Missing payment ID');
+      }
+
+      let authUrl = response.data.authorization_uri;
+      if (!authUrl) {
+        console.log('Warning: authorization_uri missing in response. Check TrueLayer sandbox configuration.');
+      }
+
+      this.paymentProgressMap.set(response.data.id, {
+        paymentId: response.data.id,
+        createdAt: Date.now(),
+        currentStatus: response.data.status || 'AuthorizationRequired',
+      });
+
+      return {
+        paymentId: response.data.id,
+        authUrl: authUrl || '',
+        status: response.data.status || 'authorization_required',
+        resourceToken: response.data.resource_token || '',
+      };
     } catch (error) {
       logError('TrueLayerService.initiatePayment', error);
       throw error;
     }
   }
 
-  async getPaymentStatus(paymentId: string, resourceToken: string): Promise<PaymentStatus> {
-    try {
-      // Mock implementation for sandbox
-      // In a real implementation, we would call the TrueLayer payments API
-
-      const statuses: ('AuthorizationRequired' | 'Initiated' | 'Settled' | 'Failed')[] = [
-        'AuthorizationRequired', 'Initiated', 'Settled', 'Failed',
-      ];
-
-      const status = statuses[Math.floor(Math.random() * statuses.length)];
-
-      return {
-        status,
-        payment_id: paymentId,
-      };
-    } catch (error) {
-      logError('TrueLayerService.getPaymentStatus', error);
-      throw error;
-    }
+  // Same as above, the fake one removed
+async getPaymentStatus(paymentId: string): Promise<PaymentStatus> {
+  try {
+    const response = await axios.post('https://truelayer-server.onrender.com/api/truelayer-request', {
+      url: `${this.dataApiUrl}/v3/payments/${paymentId}`,
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${await this.getAccessToken()}`,
+        'Content-Type': 'application/json'
+      },
+      idempotencyKey: `status-${paymentId}-${Date.now()}`
+    });
+    
+    return {
+      status: response.data.status,
+      payment_id: response.data.id,
+    };
+  } catch (error) {
+    logError('TrueLayerService.getPaymentStatus', error);
+    throw error;
   }
+}
 
+  // Revoke access to bank (not needed at the moment, note called in syncService: Disconnectbank)
   async revokeAccess(bankId: string): Promise<void> {
     try {
-      // This would call the TrueLayer API to revoke access in a real implementation
       console.log(`Access revoked for bank: ${bankId}`);
     } catch (error) {
       logError('TrueLayerService.revokeAccess', error);
@@ -657,7 +646,7 @@ export class TrueLayerService {
     }
   }
 
-  // Mock accounts for development when real API fails
+  // Mock accounts for testing, remove when real connection works (leave it for now, makes UI cool)
   async getMockAccounts(): Promise<BankAccount[]> {
     console.log('Using mock accounts data for development');
     return [
@@ -680,7 +669,7 @@ export class TrueLayerService {
     ];
   }
 
-  // Mock balances for development when real API fails
+  // Mock balances for testing remove when real connection works
   async getMockBalances(accountIds: string[]): Promise<{ [accountId: string]: Balance }> {
     console.log('Using mock balance data for development');
     const balances: { [accountId: string]: Balance } = {};
@@ -697,20 +686,18 @@ export class TrueLayerService {
     return balances;
   }
 
-  async startBankAuth(): Promise<{ success: boolean; redirectUrl?: string }> {
+  // Start bank auth flow
+  async startBankAuth(bankId: string = 'mock'): Promise<{ success: boolean; redirectUrl?: string }> {
     try {
-      // Format the query parameters properly
       const queryParams = new URLSearchParams({
         response_type: 'code',
         client_id: TRUELAYER_CLIENT_ID,
         redirect_uri: TRUELAYER_REDIRECT_URI,
-        scope: 'accounts balance transactions',
-        provider_id: 'mock',
+        scope: 'accounts balance transactions payments',
+        provider_id: bankId,
       }).toString();
 
       const authLink = `${this.authApiUrl}/?${queryParams}`;
-
-      console.log('Bank auth URL:', authLink);
 
       return {
         success: true,

@@ -6,28 +6,27 @@ import { RootStackParamList } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 
-// Import screens
+// Screen imports
 import LoginScreen from '../screens/LoginScreen';
 import RegisterScreen from '../screens/RegisterScreen';
 import DashboardScreen from '../screens/DashboardScreen';
 import ConnectBankScreen from '../screens/ConnectBankScreen';
 import BankAuthScreen from '../screens/BankAuthScreen';
-import AccountDetailsScreen from '../screens/AccountDetailsScreen';
-import AccountsScreen from '../screens/AccountsScreen';
 import TransactionListScreen from '../screens/TransactionListScreen';
 import PaymentScreen from '../screens/PaymentScreen';
 import PaymentConfirmationScreen from '../screens/PaymentConfirmationScreen';
 import ProfileScreen from '../screens/ProfileScreen';
-import ChangePasswordScreen from '../screens/ChangePasswordScreen';
-import LinkedBanksScreen from '../screens/LinkedBanksScreen';
 import AnalyticsScreen from '../screens/AnalyticsScreen';
-import DebugScreen from '../screens/DebugScreen';
+import SplashScreen from '../screens/SplashScreen';
+import PaymentAuthScreen from '../screens/PaymentAuthScreen';
+import CategoryManagementScreen from '../screens/CategoryManagementScreen';
+import EditCategoryScreen from '../screens/EditCategoryScreen';
+import CategoryTransactionsScreen from '../screens/CategoryTransactionsScreen';
 
-// Create a navigation reference with proper typing
 import { createRef } from 'react';
 export const navigationRef = createRef<NavigationContainerRef<RootStackParamList>>();
 
-// Navigation utility functions
+// Navigation helpers – safe fallback if ref not ready yet
 export function navigate(name: string & keyof RootStackParamList, params?: object) {
   if (navigationRef.current) {
     navigationRef.current.dispatch(
@@ -58,12 +57,14 @@ export function reset(index: number = 0, routes: { name: string & keyof RootStac
 
 const Stack = createStackNavigator<RootStackParamList>();
 
+// Shown while auth state is being determined
 const LoadingScreen = () => (
   <View style={styles.loadingContainer}>
     <ActivityIndicator size="large" color="#0000ff" />
   </View>
 );
 
+// Main navigation config
 export const Navigation = () => {
   const { user, loading } = useAuth();
 
@@ -73,28 +74,27 @@ export const Navigation = () => {
 
   return (
     <NavigationContainer ref={navigationRef}>
-      <Stack.Navigator initialRouteName={user ? 'Dashboard' : 'Login'}>
+      <Stack.Navigator initialRouteName="Splash">
+        <Stack.Screen name="Splash" component={SplashScreen} options={{ headerShown: false }} />
         {!user ? (
           <>
             <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
             <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
-            <Stack.Screen name="Debug" component={DebugScreen} />
           </>
         ) : (
           <>
             <Stack.Screen name="Dashboard" component={DashboardScreen} options={{ headerShown: false }} />
             <Stack.Screen name="ConnectBank" component={ConnectBankScreen} />
             <Stack.Screen name="BankAuth" component={BankAuthScreen} />
-            <Stack.Screen name="AccountDetails" component={AccountDetailsScreen} />
-            <Stack.Screen name="Accounts" component={AccountsScreen} />
             <Stack.Screen name="TransactionList" component={TransactionListScreen} />
             <Stack.Screen name="Payment" component={PaymentScreen} />
             <Stack.Screen name="PaymentConfirmation" component={PaymentConfirmationScreen} />
+            <Stack.Screen name="PaymentAuth" component={PaymentAuthScreen} />
             <Stack.Screen name="Profile" component={ProfileScreen} />
-            <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
-            <Stack.Screen name="LinkedBanks" component={LinkedBanksScreen} />
             <Stack.Screen name="Analytics" component={AnalyticsScreen} />
-            <Stack.Screen name="Debug" component={DebugScreen} />
+            <Stack.Screen name="CategoryManagement" component={CategoryManagementScreen} />
+            <Stack.Screen name="EditCategory" component={EditCategoryScreen} />
+            <Stack.Screen name="CategoryTransactions" component={CategoryTransactionsScreen} />
           </>
         )}
       </Stack.Navigator>

@@ -1,11 +1,8 @@
-// src/services/syncService.ts
-
 import { trueLayerService, BankAccount, Balance, Transaction } from './trueLayerService';
 import { firebaseService } from './firebaseService';
 import { cacheService } from './cacheService';
 import { logError } from '../utils/errorHandling';
 import moment from 'moment';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface SyncStatus {
   lastSync: string | null;
@@ -45,8 +42,7 @@ export class SyncService {
       try {
         accounts = await trueLayerService.getAccounts();
       } catch (error) {
-        console.error('Failed to get accounts:', error);
-        // Rethrow the error - we want to fail if we can't get real accounts
+        console.log('Failed to get accounts:', error);
         throw error;
       }
 
@@ -57,8 +53,7 @@ export class SyncService {
       try {
         balances = await trueLayerService.getBalances(accountIds);
       } catch (error) {
-        console.error('Failed to get balances:', error);
-        // Rethrow the error - we want to fail if we can't get real balances
+        console.log('Failed to get balances:', error);
         throw error;
       }
 
@@ -68,7 +63,7 @@ export class SyncService {
       }));
 
       // Save to cache
-      await cacheService.setCache('accounts', accountsWithBalance, { expiryMinutes: 5 });
+      await cacheService.setCache('accounts', accountsWithBalance, { expiryMinutes: 2 });
       console.log(`Cached ${accountsWithBalance.length} accounts with balances`);
 
       // Group accounts by bank for firebase storage
@@ -114,8 +109,6 @@ export class SyncService {
         error: error instanceof Error ? error.message : 'Failed to sync accounts',
       };
       await cacheService.setCache('syncStatus', this.syncStatus);
-      
-      // Rethrow the error to show appropriate UI feedback
       throw error;
     }
   }
@@ -132,179 +125,94 @@ export class SyncService {
       }
     } catch (error) {
       logError('SyncService.init', error);
-      console.error('Failed to initialize SyncService');
+      console.log('Failed to initialize SyncService');
     }
   }
 
   async getAccounts(): Promise<(BankAccount & { balance: Balance | null })[]> {
-    try {
-      // First try to get cached accounts with a short expiry
-      const cachedAccounts = await cacheService.getCache<(BankAccount & { balance: Balance | null })[]>('accounts', {
-        expiryMinutes: 5,
-      });
+  try {
+    // First try to get cached accounts with a short expiry
+    const cachedAccounts = await cacheService.getCache<(BankAccount & { balance: Balance | null })[]>('accounts', {
+      expiryMinutes: 2, // Changed from 2 for app benefit
+    });
 
-      if (cachedAccounts && cachedAccounts.length > 0) {
-        console.log(`Found ${cachedAccounts.length} accounts in cache`);
-        return cachedAccounts;
-      }
-
-      console.log('No cached accounts or cache expired, fetching from API');
-      
-      // Check if we have an access token
-      const token = await trueLayerService.getAccessToken();
-      if (!token) {
-        console.log('No access token available');
-        throw new Error('No access token available. Please connect a bank first.');
-      }
-
-      // Fetch accounts and balances
-      try {
-        const accounts = await trueLayerService.getAccounts();
-        const accountIds = accounts.map((a) => a.account_id);
-        const balances = await trueLayerService.getBalances(accountIds);
-
-        const accountsWithBalance = accounts.map((account) => ({
-          ...account,
-          balance: balances[account.account_id] || null,
-        }));
-
-        // Cache the accounts for future use
-        await cacheService.setCache('accounts', accountsWithBalance, { expiryMinutes: 5 });
-        console.log(`Cached ${accountsWithBalance.length} accounts`);
-
-        return accountsWithBalance;
-      } catch (error) {
-        // If we failed to get accounts from the API, check if we have any older cached accounts
-        const oldCachedAccounts = await cacheService.getCache<(BankAccount & { balance: Balance | null })[]>('accounts', {
-          expiryMinutes: 60 * 24, // Try with a much longer expiry to get any cached data
-        });
-
-        if (oldCachedAccounts && oldCachedAccounts.length > 0) {
-          console.log(`Found ${oldCachedAccounts.length} accounts in older cache`);
-          return oldCachedAccounts;
-        }
-        
-        // No cached accounts at all, rethrow the error
-        throw error;
-      }
-    } catch (error) {
-      logError('SyncService.getAccounts', error);
-      // We want to be explicit about errors - no automatic fallback to mock data
-      throw error;
+    if (cachedAccounts && cachedAccounts.length > 0) {
+      console.log(`Found ${cachedAccounts.length} accounts in cache`);
+      return cachedAccounts;
     }
+
+    console.log('No cached accounts or cache expired, fetching from API');
+    
+    // Check for access token
+    const token = await trueLayerService.getAccessToken();
+    if (!token) {
+      console.log('No access token available');
+      throw new Error('No access token available. Please connect a bank first.');
+    }
+
+    // Fetch accounts and balances
+    const accounts = await trueLayerService.getAccounts();
+    const accountIds = accounts.map((a) => a.account_id);
+    const balances = await trueLayerService.getBalances(accountIds);
+
+    const accountsWithBalance = accounts.map((account) => ({
+      ...account,
+      balance: balances[account.account_id] || null,
+    }));
+
+    // Cache the accounts for future use
+    console.log(`Cached ${accountsWithBalance.length} accounts`);
+
+    return accountsWithBalance;
+    
+    // Removed, all the old cache fallback thing causing app to fail
+    
+  } catch (error) {
+    logError('SyncService.getAccounts', error);
+    throw error; // Let it fail properly instead of using old cache
   }
+}
 
   // Get transactions for an account 
   async getTransactions(accountId: string, forceRefresh: boolean = false): Promise<Transaction[]> {
-    try {
-      const cacheKey = `transactions_${accountId}`;
+  try {
+    const cacheKey = `transactions_${accountId}`;
+    
+    // Check cache first unless force refresh is requested
+    if (!forceRefresh) {
+      const cachedTransactions = await cacheService.getCache<Transaction[]>(cacheKey, {
+        expiryMinutes: 2, // Changed to 2
+      });
       
-      // Check cache first unless force refresh is requested
-      if (!forceRefresh) {
-        const cachedTransactions = await cacheService.getCache<Transaction[]>(cacheKey, {
-          expiryMinutes: 30, // Cache transactions for 30 minutes
-        });
-        
-        if (cachedTransactions && cachedTransactions.length > 0) {
-          console.log(`Found ${cachedTransactions.length} transactions in cache for account ${accountId}`);
-          return cachedTransactions;
-        }
+      if (cachedTransactions && cachedTransactions.length > 0) {
+        console.log(`Found ${cachedTransactions.length} transactions in cache for account ${accountId}`);
+        return cachedTransactions;
       }
-      
-      console.log(`Fetching transactions for account ${accountId}`);
-      
-      // Set date range for last 90 days
-      const toDate = moment().format('YYYY-MM-DD');
-      const fromDate = moment().subtract(90, 'days').format('YYYY-MM-DD');
-      
-      // Get transactions from the API
-      const transactions = await trueLayerService.getTransactions(accountId, fromDate, toDate);
-      
-      // Cache the transactions
-      await cacheService.setCache(cacheKey, transactions, { expiryMinutes: 30 });
-      console.log(`Cached ${transactions.length} transactions for account ${accountId}`);
-      
-      return transactions;
-    } catch (error) {
-      logError('SyncService.getTransactions', error);
-      
-      // Check for old cached transactions as a fallback
-      try {
-        const cacheKey = `transactions_${accountId}`;
-        const oldCachedTransactions = await cacheService.getCache<Transaction[]>(cacheKey, {
-          expiryMinutes: 60 * 24 * 7, // Try with a much longer expiry (1 week) to get any cached data
-        });
-        
-        if (oldCachedTransactions && oldCachedTransactions.length > 0) {
-          console.log(`Found ${oldCachedTransactions.length} transactions in older cache`);
-          return oldCachedTransactions;
-        }
-      } catch (cacheError) {
-        // If even the cache fallback fails, just continue and throw the original error
-        console.warn('Failed to retrieve old cached transactions:', cacheError);
-      }
-      
-      // Throw the original error
-      throw error;
     }
+    
+    console.log(`Fetching transactions for account ${accountId}`);
+    
+    // Set date range for last 90 days
+    const toDate = moment.utc().format('YYYY-MM-DD');
+    const fromDate = moment.utc().subtract(90, 'days').format('YYYY-MM-DD');
+    
+    // Get transactions from the API
+    const transactions = await trueLayerService.getTransactions(accountId, fromDate, toDate);
+    
+    // Cache the transactions
+    await cacheService.setCache(cacheKey, transactions, { expiryMinutes: 2 });
+    console.log(`Cached ${transactions.length} transactions for account ${accountId}`);
+    
+    return transactions;
+    
+    // Removed, all the old cache fallback thing causing app to fail
+    
+  } catch (error) {
+    logError('SyncService.getTransactions', error);
+    throw error; // Let it fail properly instead of using old cache
   }
+}
 
-  // Disconnect a bank
-  async disconnectBank(bankId: string): Promise<void> {
-    try {
-      console.log(`Disconnecting bank with ID: ${bankId}`);
-      
-      // Get the current user ID
-      const userId = firebaseService.getCurrentUserId();
-      if (!userId) {
-        throw new Error('User not authenticated');
-      }
-      
-      // Attempt to revoke access with TrueLayer
-      try {
-        await trueLayerService.revokeAccess(bankId);
-      } catch (error) {
-        console.warn('Could not revoke access with TrueLayer, continuing with local removal', error);
-        // Continue with local cleanup even if TrueLayer revocation fails
-      }
-      
-      // Remove from Firebase
-      await firebaseService.removeBankConnection(userId, bankId);
-      console.log(`Removed bank connection from Firebase`);
-      
-      // Update cached accounts
-      const cachedAccounts = await cacheService.getCache<(BankAccount & { balance: Balance | null })[]>('accounts');
-      
-      if (cachedAccounts) {
-        // Filter out accounts from this bank
-        const updatedAccounts = cachedAccounts.filter(account => account.institution_id !== bankId);
-        
-        // Update the cache
-        await cacheService.setCache('accounts', updatedAccounts);
-        console.log(`Updated cached accounts after disconnecting bank`);
-      }
-      
-      // Remove any transaction caches for this bank's accounts
-      const allKeys = await AsyncStorage.getAllKeys();
-      const transactionKeysToRemove = allKeys.filter(key => 
-        key.startsWith('cache_transactions_') && 
-        cachedAccounts?.some(acc => 
-          acc.institution_id === bankId && 
-          key.includes(acc.account_id)
-        )
-      );
-      
-      if (transactionKeysToRemove.length > 0) {
-        await AsyncStorage.multiRemove(transactionKeysToRemove);
-        console.log(`Removed ${transactionKeysToRemove.length} transaction cache entries`);
-      }
-      
-      console.log(`Bank disconnection completed successfully`);
-    } catch (error) {
-      logError('SyncService.disconnectBank', error);
-      throw error;
-    }
-  }
 }
 
 export const syncService = new SyncService();

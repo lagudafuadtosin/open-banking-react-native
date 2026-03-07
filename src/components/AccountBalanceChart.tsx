@@ -1,10 +1,17 @@
 import React from 'react';
 import { View, Text, StyleSheet, Dimensions } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
-import { Balance } from '../services/trueLayerService';
+import moment from 'moment';
+import COLORS from '../constants/colors';
+
+interface DailyBalance {
+  date: string;
+  balance: number;
+  currency: string;
+}
 
 interface AccountBalanceChartProps {
-  balanceHistory: Balance[];
+  balanceHistory: DailyBalance[];
   currency: string;
 }
 
@@ -12,14 +19,25 @@ const AccountBalanceChart: React.FC<AccountBalanceChartProps> = ({
   balanceHistory, 
   currency 
 }) => {
-  // Format dates and values for the chart
-  const labels = balanceHistory.map(b => 
-    new Date(b.last_updated).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })
-  );
   
-  const data = balanceHistory.map(b => b.available ?? 0); // Fallback to 0 if undefined
+  // When no balance data is available
+  if (!balanceHistory || balanceHistory.length === 0) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Balance This Month</Text>
+        <View style={styles.noDataContainer}>
+          <Text style={styles.noDataText}>No balance data available for this month.</Text>
+        </View>
+      </View>
+    );
+  }
   
-  // Calculate min/max for better display
+  // Prepare chart data - show every 5th day to avoid crowding
+  const labels = balanceHistory
+    .filter((_, index) => index % 5 === 0 || index === balanceHistory.length - 1)
+    .map(item => moment(item.date).format('DD'));
+  
+  const data = balanceHistory.map(item => item.balance);
   const minValue = Math.min(...data) * 0.95;
   const maxValue = Math.max(...data) * 1.05;
   
@@ -33,57 +51,82 @@ const AccountBalanceChart: React.FC<AccountBalanceChartProps> = ({
     }).format(value);
   };
   
-  // Modified formatYLabel to accept string and convert to number
-  const formatYLabel = (yLabel: string) => {
-    const value = parseFloat(yLabel);
-    return formatCurrency(value);
-  };
+  // Calculate percentage for summary
+  const currentBalance = balanceHistory[balanceHistory.length - 1]?.balance || 0;
+  const startBalance = balanceHistory[0]?.balance || 0;
+  const change = currentBalance - startBalance;
+  const changePercent = startBalance > 0 ? ((change / startBalance) * 100) : 0;
   
+  // Display current balance
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Balance History</Text>
-      {balanceHistory.length > 1 ? (
-        <LineChart
-          data={{
-            labels,
-            datasets: [
-              {
-                data,
-                color: (opacity = 1) => `rgba(26, 115, 232, ${opacity})`,
-                strokeWidth: 2,
-              },
-            ],
-          }}
-          width={Dimensions.get('window').width - 40}
-          height={220}
-          yAxisLabel=""
-          yAxisSuffix=""
-          yAxisInterval={1}
-          chartConfig={{
-            backgroundColor: '#ffffff',
-            backgroundGradientFrom: '#ffffff',
-            backgroundGradientTo: '#ffffff',
-            decimalPlaces: 0,
-            color: (opacity = 1) => `rgba(26, 115, 232, ${opacity})`,
-            labelColor: (opacity = 1) => `rgba(95, 99, 104, ${opacity})`,
-            style: {
-              borderRadius: 16,
-            },
-            propsForDots: {
-              r: '4',
-              strokeWidth: '2',
-              stroke: '#1a73e8',
-            },
-            formatYLabel: formatYLabel,
-          }}
-          bezier
-          style={styles.chart}
-        />
-      ) : (
-        <View style={styles.noDataContainer}>
-          <Text style={styles.noDataText}>
-            Not enough data to display balance history.
+      <Text style={styles.title}>Balance This Month</Text>
+      
+      <View style={styles.summaryContainer}>
+        <View style={styles.balanceRow}>
+          <Text style={styles.currentBalanceLabel}>Current Balance</Text>
+          <Text style={styles.currentBalance}>{formatCurrency(currentBalance)}</Text>
+        </View>
+        
+        <View style={styles.changeRow}>
+          <Text style={styles.changeLabel}>This Month</Text>
+          <Text style={[
+            styles.changeAmount, 
+            change >= 0 ? styles.positiveChange : styles.negativeChange
+          ]}>
+            {change >= 0 ? '+' : ''}{formatCurrency(change)} ({changePercent.toFixed(1)}%)
           </Text>
+        </View>
+      </View>
+      
+      {balanceHistory.length > 1 ? (
+          <LineChart
+            data={{
+              labels,
+              datasets: [
+                {
+                  data,
+                  color: (opacity = 1) => `rgba(106, 13, 173, ${opacity})`,
+                  strokeWidth: 2,
+                },
+              ],
+            }}
+            width={Dimensions.get('window').width - 60}
+            height={300}
+            yAxisLabel=""
+            yAxisSuffix=""
+            segments={4}
+            chartConfig={{
+              backgroundColor: COLORS.white,
+              backgroundGradientFrom: COLORS.white,
+              backgroundGradientTo: COLORS.white,
+              decimalPlaces: 0,
+              color: (opacity = 1) => `rgba(106, 13, 173, ${opacity})`,
+              labelColor: (opacity = 1) => `rgba(158, 158, 158, ${opacity})`,
+              style: {
+                borderRadius: 16,
+              },
+              propsForDots: {
+                r: '3',
+                strokeWidth: '1',
+                stroke: COLORS.primary,
+              },
+              formatYLabel: (value: string) => {
+                const numValue = parseFloat(value);
+                if (numValue >= 1000) {
+                  return `£${(numValue / 1000).toFixed(1)}k`;
+                }
+                return `£${numValue.toFixed(0)}`;
+              },
+              paddingTop: 20,
+              paddingRight: 20,
+            }}
+            style={styles.chart}
+            fromZero={false}
+          />
+      ) : (
+        <View style={styles.noChartContainer}>
+          <Text style={styles.noChartText}>Not enough data to display chart</Text>
         </View>
       )}
     </View>
@@ -92,11 +135,11 @@ const AccountBalanceChart: React.FC<AccountBalanceChartProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
     padding: 15,
     borderRadius: 10,
     marginBottom: 15,
-    shadowColor: '#000',
+    shadowColor: COLORS.black,
     shadowOffset: {
       width: 0,
       height: 2,
@@ -104,25 +147,72 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3,
     elevation: 3,
+    flex: 1,
   },
   title: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#202124',
+    color: COLORS.text,
     marginBottom: 15,
+  },
+  summaryContainer: {
+    marginBottom: 15,
+  },
+  balanceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  currentBalanceLabel: {
+    fontSize: 16,
+    color: COLORS.gray,
+  },
+  currentBalance: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+  },
+  changeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  changeLabel: {
+    fontSize: 14,
+    color: COLORS.gray,
+  },
+  changeAmount: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  positiveChange: {
+    color: COLORS.success,
+  },
+  negativeChange: {
+    color: COLORS.error,
   },
   chart: {
     marginLeft: -15,
     borderRadius: 10,
+    paddingRight: 20,
   },
   noDataContainer: {
-    height: 220,
     alignItems: 'center',
     justifyContent: 'center',
   },
   noDataText: {
-    color: '#5f6368',
+    color: COLORS.gray,
     fontSize: 16,
+    textAlign: 'center',
+  },
+  noChartContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noChartText: {
+    color: COLORS.gray,
+    fontSize: 14,
     textAlign: 'center',
   },
 });

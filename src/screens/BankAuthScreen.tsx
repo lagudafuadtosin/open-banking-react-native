@@ -1,5 +1,5 @@
 import React, { useState, useContext, useEffect, useRef } from 'react';
-import { View, ActivityIndicator, StyleSheet, Alert, BackHandler, Text } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Alert, BackHandler, Text, KeyboardAvoidingView, Platform, ScrollView, Keyboard } from 'react-native';
 import WebView from 'react-native-webview';
 import { trueLayerService } from '../services/trueLayerService';
 import { AuthContext } from '../context/AuthContext';
@@ -7,6 +7,9 @@ import { RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
 import { TRUELAYER_REDIRECT_URI } from '@env';
+import COLORS from '../constants/colors';
+import { SessionTimeoutWrapper } from '../hooks/SessionTimeoutWrapper';
+import { cacheService } from '../services/cacheService';
 
 type BankAuthScreenRouteProp = RouteProp<RootStackParamList, 'BankAuth'>;
 type BankAuthScreenNavigationProp = StackNavigationProp<RootStackParamList, 'BankAuth'>;
@@ -26,20 +29,67 @@ const BankAuthScreen: React.FC<BankAuthScreenProps> = ({ route, navigation }) =>
   const [showWebView, setShowWebView] = useState(true);
   const webViewRef = useRef<WebView | null>(null);
 
-  // Handle hardware back button
+  const injectedJavaScript = `
+    (function() {
+      // Ensure input fields focus on first tap
+      function setupInputFocus() {
+        const inputs = document.querySelectorAll('input, textarea');
+        inputs.forEach(input => {
+          input.addEventListener('touchstart', function(e) {
+            e.stopPropagation();
+            this.focus();
+            window.ReactNativeWebView.postMessage('Input focused: ' + this.name);
+          }, { passive: false });
+        });
+      }
+
+      // Ensure buttons respond to single tap and prevent keyboard dismissal
+      function setupButtonClicks() {
+        const buttons = document.querySelectorAll('button, [role="button"], [type="submit"], a');
+        let isProcessing = false;
+        buttons.forEach(button => {
+          button.addEventListener('touchstart', function(e) {
+            if (isProcessing) return;
+            isProcessing = true;
+            e.preventDefault();
+            e.stopPropagation();
+            this.click();
+            window.ReactNativeWebView.postMessage('Button clicked: ' + this.textContent);
+            setTimeout(() => { isProcessing = false; }, 1000);
+          }, { passive: false });
+        });
+      }
+
+      // Run on page load and observe DOM changes for dynamic content
+      document.addEventListener('DOMContentLoaded', function() {
+        setupInputFocus();
+        setupButtonClicks();
+      });
+
+      // Handle dynamic content (TrueLayer may load elements asynchronously)
+      const observer = new MutationObserver(function() {
+        setupInputFocus();
+        setupButtonClicks();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    })();
+    true;
+  `;
+
+  // Handle Android hardware back button to prevent back during redirect processing
   useEffect(() => {
     const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
       if (!processingRedirect) {
         navigation.goBack();
         return true;
       }
-      return true; // Prevent going back during authentication
+      return true; // Block back navigation during auth redirect
     });
 
     return () => backHandler.remove();
   }, [navigation, processingRedirect]);
 
-  // Prepare the auth URL on component mount
+  // Fetch and prepare the bank authentication URL when component mounts
   useEffect(() => {
     let isMounted = true;
 
@@ -77,21 +127,22 @@ const BankAuthScreen: React.FC<BankAuthScreenProps> = ({ route, navigation }) =>
     };
   }, [bankId, bankName]);
 
+  // Handle navigation changes in the WebView, mainly to detect the redirect URI
   const handleNavigationStateChange = async (navState: any) => {
     const url = navState.url;
     console.log('WebView navigated to:', url);
 
-    // Only process the redirect once
+    // Process redirect URI only once
     if (url.startsWith(TRUELAYER_REDIRECT_URI) && !processingRedirect) {
       setProcessingRedirect(true);
       setLoading(true);
-      setShowWebView(false); // Hide WebView to prevent interference
+      setShowWebView(false); // Hide WebView to avoid UI interference
       console.log('WebView hidden');
 
       try {
         console.log('Redirect URI detected:', url);
 
-        // Extract code from URL
+        // Extract authorization code from redirect URL
         const code = await trueLayerService.handleRedirectUri(url);
         if (!user) {
           throw new Error('User not authenticated.');
@@ -101,20 +152,23 @@ const BankAuthScreen: React.FC<BankAuthScreenProps> = ({ route, navigation }) =>
         await trueLayerService.exchangeCodeForToken(code, user.uid, bankId, bankName);
         console.log('Token exchange successful');
 
-        // Stop the WebView from further loading
+        // Clear old cache so new bank data loads fresh
+        await cacheService.clearAllCache();
+
+        // Stop WebView loading after successful token exchange
         if (webViewRef.current) {
           webViewRef.current.stopLoading();
         }
 
-        // Notify parent of success and return
+        // Navigate back after short delay to show success state
         setTimeout(() => {
           console.log('Returning to ConnectBankScreen with success');
-          navigation.goBack(); // Return to ConnectBankScreen
+          navigation.navigate('ConnectBank', { fromAuth: true });
         }, 2000);
       } catch (error) {
         console.error('Bank auth error:', error);
 
-        // More specific error message
+        // Set user-friendly error messages based on error type
         let errorMessage = 'Failed to connect bank. Please try again.';
         if (error instanceof Error) {
           if (error.message.includes('No authorization code')) {
@@ -146,6 +200,25 @@ const BankAuthScreen: React.FC<BankAuthScreenProps> = ({ route, navigation }) =>
     }
   };
 
+  // Add keyboard event listener to scroll input into view
+  useEffect(() => {
+    const keyboardDidShow = Keyboard.addListener('keyboardDidShow', () => {
+      if (webViewRef.current) {
+        webViewRef.current.injectJavaScript(`
+          const activeElement = document.activeElement;
+          if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+            activeElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        `);
+      }
+    });
+
+    return () => {
+      keyboardDidShow.remove();
+    };
+  }, []);
+
+  // Show error message screen if error occurs
   if (error) {
     return (
       <View style={styles.errorContainer}>
@@ -156,51 +229,82 @@ const BankAuthScreen: React.FC<BankAuthScreenProps> = ({ route, navigation }) =>
   }
 
   return (
-    <View style={styles.container}>
-      {authUrl && showWebView ? (
-        <WebView
-          ref={webViewRef}
-          source={{ uri: authUrl }}
-          onNavigationStateChange={handleNavigationStateChange}
-          onLoadStart={() => setLoading(true)}
-          onLoadEnd={() => setLoading(false)}
-          style={styles.webview}
-          javaScriptEnabled={true}
-          domStorageEnabled={true}
-          userAgent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-          onError={(syntheticEvent) => {
-            const { nativeEvent } = syntheticEvent;
-            console.error('WebView error:', nativeEvent);
-          }}
-        />
-      ) : !authUrl ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1a73e8" />
-          <Text style={styles.loadingText}>Preparing bank authentication...</Text>
-        </View>
-      ) : (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#1a73e8" />
-          <Text style={styles.loadingText}>Connecting to your bank account...</Text>
-        </View>
-      )}
+    <SessionTimeoutWrapper>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.container}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      >
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ flexGrow: 1 }}
+        >
+          <View style={styles.container}>
+            {authUrl && showWebView ? (
+              <WebView
+                ref={webViewRef}
+                source={{ uri: authUrl }}
+                onNavigationStateChange={handleNavigationStateChange}
+                onLoadStart={() => setLoading(true)}
+                onLoadEnd={() => setLoading(false)}
+                style={styles.webview}
+                javaScriptEnabled={true}
+                domStorageEnabled={true}
+                thirdPartyCookiesEnabled={true}
+                allowsBackForwardNavigationGestures={true}
+                allowFileAccess={true}
+                cacheEnabled={true}
+                cacheMode="LOAD_DEFAULT"
+                userAgent="Mozilla/5.0 (Linux; Android 10; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Mobile Safari/537.36"
+                scalesPageToFit={true}
+                bounces={false}
+                scrollEnabled={true}
+                automaticallyAdjustContentInsets={true}
+                keyboardDisplayRequiresUserAction={false}
+                injectedJavaScript={injectedJavaScript}
+                onError={(syntheticEvent) => {
+                  console.error('WebView error:', syntheticEvent.nativeEvent);
+                  setError('WebView failed to load. Please try again.');
+                }}
+                onHttpError={(syntheticEvent) => {
+                  console.error('WebView HTTP error:', syntheticEvent.nativeEvent);
+                  setError(`HTTP error ${syntheticEvent.nativeEvent.statusCode}. Please try again.`);
+                }}
+                onMessage={(event) => {
+                  console.log('WebView message:', event.nativeEvent.data);
+                }}
+              />
+            ) : !authUrl ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={COLORS.primary} />
+                <Text style={styles.loadingText}>Preparing bank authentication...</Text>
+              </View>
+            ) : (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color={COLORS.primary} />
+                <Text style={styles.loadingText}>Connecting to your bank account...</Text>
+              </View>
+            )}
 
-      {loading && (
-        <View style={styles.loading}>
-          <ActivityIndicator size="large" color="#1a73e8" />
-          <Text style={styles.loadingText}>
-            {processingRedirect ? 'Connecting to your accounts...' : `Connecting to ${bankName}...`}
-          </Text>
-        </View>
-      )}
-    </View>
+            {loading && (
+              <View style={styles.loading}>
+                <ActivityIndicator size="large" color={COLORS.primary} />
+                <Text style={styles.loadingText}>
+                  {processingRedirect ? 'Connecting to your accounts...' : `Connecting to ${bankName}...`}
+                </Text>
+              </View>
+            )}
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SessionTimeoutWrapper>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: COLORS.lightGray,
   },
   webview: {
     flex: 1,
@@ -222,7 +326,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 10,
-    color: '#5f6368',
+    color: COLORS.gray,
     fontSize: 16,
   },
   errorContainer: {
@@ -230,18 +334,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: COLORS.lightGray,
   },
   errorText: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#ea4335',
+    color: COLORS.error,
     marginBottom: 10,
     textAlign: 'center',
   },
   errorSubtext: {
     fontSize: 16,
-    color: '#5f6368',
+    color: COLORS.gray,
     textAlign: 'center',
   },
 });

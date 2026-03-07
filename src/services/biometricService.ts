@@ -13,9 +13,8 @@ export class BiometricService {
     this.secureStorage = secureStorage;
   }
   
-  /**
-   * Check if biometric authentication is available on the device
-   */
+  // Check if biometric authentication is available on the device
+   
   async isBiometricAvailable(): Promise<boolean> {
     try {
       const { available, biometryType } = await this.rnBiometrics.isSensorAvailable();
@@ -30,9 +29,8 @@ export class BiometricService {
     }
   }
   
-  /**
-   * Create a biometric key pair for secure operations
-   */
+  // Create a biometric key pair for secure operations
+   
   async createKeys(): Promise<boolean> {
     try {
       // Delete existing keys if they exist to avoid conflicts
@@ -49,9 +47,8 @@ export class BiometricService {
     }
   }
   
-  /**
-   * Check if keys already exist
-   */
+  // Check if keys already exist
+   
   async keysExist(): Promise<boolean> {
     try {
       const { keysExist } = await this.rnBiometrics.biometricKeysExist();
@@ -62,9 +59,7 @@ export class BiometricService {
     }
   }
   
-  /**
-   * Prompt user for biometric authentication
-   */
+  // Prompt user for biometric authentication
   async authenticate(promptMessage: string = 'Confirm your identity'): Promise<boolean> {
     try {
       const { success } = await this.rnBiometrics.simplePrompt({
@@ -78,22 +73,8 @@ export class BiometricService {
     }
   }
   
-  /**
-   * Sign data with biometric authentication
-   */
-  async signWithBiometrics(payload: string): Promise<string | null> {
-    try {
-      const result = await this.rnBiometrics.createSignature({
-        promptMessage: 'Sign with your biometric',
-        payload,
-      });
-      return result.signature || null;
-    } catch (error) {
-      logError('BiometricService.signWithBiometrics', error);
-      return null;
-    }
-  }
+
 }
 
-// Create and export a singleton instance
+
 export const biometricService = new BiometricService();

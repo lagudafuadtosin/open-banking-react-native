@@ -1,3 +1,5 @@
+// Very basic, if needed improve
+
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -12,6 +14,9 @@ import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../types';
 import { trueLayerService, PaymentStatus } from '../services/trueLayerService';
 import Icon from 'react-native-vector-icons/MaterialIcons';
+import COLORS from '../constants/colors';
+import { SessionTimeoutWrapper } from '../hooks/SessionTimeoutWrapper';
+import { logError } from '../utils/errorHandling';
 
 type PaymentConfirmationScreenNavigationProp = StackNavigationProp<
   RootStackParamList,
@@ -31,16 +36,16 @@ const PaymentConfirmationScreen: React.FC<PaymentConfirmationScreenProps> = ({
   navigation,
   route,
 }) => {
-  const { paymentId, resourceToken, amount, recipient } = route.params;
+  const { paymentId, amount, recipient } = route.params;
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   const checkPaymentStatus = async () => {
     try {
-      const status = await trueLayerService.getPaymentStatus(paymentId, resourceToken);
+      const status = await trueLayerService.getPaymentStatus(paymentId);
       setPaymentStatus(status);
     } catch (error: any) {
-      console.error('Error checking payment status:', error);
+      logError('PaymentConfirmationScreen.checkPaymentStatus', error);
       Alert.alert('Error', 'Failed to check payment status. Please try again later.');
     } finally {
       setIsLoading(false);
@@ -51,30 +56,30 @@ const PaymentConfirmationScreen: React.FC<PaymentConfirmationScreenProps> = ({
     checkPaymentStatus();
     const interval = setInterval(checkPaymentStatus, 5000);
     return () => clearInterval(interval);
-  }, [paymentId, resourceToken]);
+  }, [paymentId]);
 
   const getStatusIcon = () => {
     if (!paymentStatus) return null;
     switch (paymentStatus.status) {
-      case 'Settled':
-        return <Icon name="check-circle" size={60} color="#34a853" />;
-      case 'Failed':
-        return <Icon name="error" size={60} color="#ea4335" />;
+      case 'executed':
+      case 'settled':
+        return <Icon name="check-circle" size={60} color={COLORS.success} />;
+      case 'failed':
+        return <Icon name="error" size={60} color={COLORS.error} />;
       default:
-        return <ActivityIndicator size="large" color="#1a73e8" />;
+        return <ActivityIndicator size="large" color={COLORS.primary} />;
     }
   };
 
   const getStatusMessage = () => {
     if (!paymentStatus) return 'Checking payment status...';
     switch (paymentStatus.status) {
-      case 'Settled':
+      case 'executed':
+      case 'settled':
         return 'Payment Successful!';
-      case 'Failed':
+      case 'failed':
         return 'Payment Failed';
-      case 'Initiated':
-        return 'Payment Initiated...';
-      case 'AuthorizationRequired':
+      case 'authorization_required':
         return 'Authorization Required';
       default:
         return 'Processing Payment...';
@@ -82,50 +87,52 @@ const PaymentConfirmationScreen: React.FC<PaymentConfirmationScreenProps> = ({
   };
 
   return (
-    <View style={styles.container}>
-      {isLoading ? (
-        <ActivityIndicator size="large" color="#1a73e8" />
-      ) : (
-        <>
-          <View style={styles.statusContainer}>{getStatusIcon()}</View>
-          <Text style={styles.statusMessage}>{getStatusMessage()}</Text>
+    <SessionTimeoutWrapper>
+      <View style={styles.container}>
+        {isLoading ? (
+          <ActivityIndicator size="large" color={COLORS.primary} />
+        ) : (
+          <>
+            <View style={styles.statusContainer}>{getStatusIcon()}</View>
+            <Text style={styles.statusMessage}>{getStatusMessage()}</Text>
 
-          <View style={styles.detailsContainer}>
-            <Text style={styles.detailLabel}>Recipient</Text>
-            <Text style={styles.detailValue}>{recipient.name}</Text>
+            <View style={styles.detailsContainer}>
+              <Text style={styles.detailLabel}>Recipient</Text>
+              <Text style={styles.detailValue}>{recipient.name}</Text>
 
-            <Text style={styles.detailLabel}>Amount</Text>
-            <Text style={styles.detailValue}>
-              {new Intl.NumberFormat('en-GB', {
-                style: 'currency',
-                currency: 'GBP',
-              }).format(amount)}
-            </Text>
+              <Text style={styles.detailLabel}>Amount</Text>
+              <Text style={styles.detailValue}>
+                {new Intl.NumberFormat('en-GB', {
+                  style: 'currency',
+                  currency: 'GBP',
+                }).format(amount)}
+              </Text>
 
-            <Text style={styles.detailLabel}>Payment ID</Text>
-            <Text style={styles.detailValue}>{paymentId}</Text>
-          </View>
+              <Text style={styles.detailLabel}>Payment ID</Text>
+              <Text style={styles.detailValue}>{paymentId}</Text>
+            </View>
 
-          {paymentStatus?.status === 'Settled' && (
-            <TouchableOpacity
-              style={styles.doneButton}
-              onPress={() => navigation.navigate('Dashboard')}
-            >
-              <Text style={styles.doneButtonText}>Done</Text>
-            </TouchableOpacity>
-          )}
+            {(paymentStatus?.status === 'executed' || paymentStatus?.status === 'settled') && (
+              <TouchableOpacity
+                style={styles.doneButton}
+                onPress={() => navigation.navigate('Dashboard')}
+              >
+                <Text style={styles.doneButtonText}>Done</Text>
+              </TouchableOpacity>
+            )}
 
-          {paymentStatus?.status === 'Failed' && (
-            <TouchableOpacity
-              style={styles.retryButton}
-              onPress={() => navigation.goBack()}
-            >
-              <Text style={styles.retryButtonText}>Try Again</Text>
-            </TouchableOpacity>
-          )}
-        </>
-      )}
-    </View>
+            {paymentStatus?.status === 'failed' && (
+              <TouchableOpacity
+                style={styles.retryButton}
+                onPress={() => navigation.navigate('Payment')}
+              >
+                <Text style={styles.retryButtonText}>Try Again</Text>
+              </TouchableOpacity>
+            )}
+          </>
+        )}
+      </View>
+    </SessionTimeoutWrapper>
   );
 };
 
@@ -134,7 +141,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: COLORS.lightGray,
     padding: 20,
   },
   statusContainer: {
@@ -143,15 +150,15 @@ const styles = StyleSheet.create({
   statusMessage: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: '#202124',
+    color: COLORS.text,
     marginBottom: 30,
   },
   detailsContainer: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
     padding: 20,
     borderRadius: 10,
     width: '100%',
-    shadowColor: '#000',
+    shadowColor: COLORS.black,
     shadowOffset: {
       width: 0,
       height: 2,
@@ -162,35 +169,35 @@ const styles = StyleSheet.create({
   },
   detailLabel: {
     fontSize: 14,
-    color: '#5f6368',
+    color: COLORS.gray,
     marginBottom: 5,
   },
   detailValue: {
     fontSize: 16,
-    color: '#202124',
+    color: COLORS.text,
     marginBottom: 15,
   },
   doneButton: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: COLORS.primary,
     paddingVertical: 15,
     paddingHorizontal: 30,
     borderRadius: 8,
     marginTop: 30,
   },
   doneButtonText: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: 16,
     fontWeight: 'bold',
   },
   retryButton: {
-    backgroundColor: '#ea4335',
+    backgroundColor: COLORS.error,
     paddingVertical: 15,
     paddingHorizontal: 30,
     borderRadius: 8,
     marginTop: 30,
   },
   retryButtonText: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: 16,
     fontWeight: 'bold',
   },

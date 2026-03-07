@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useContext, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   RefreshControl,
   Alert,
   ActivityIndicator,
+  Image,
 } from 'react-native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../types';
@@ -15,6 +16,9 @@ import { AuthContext } from '../context/AuthContext';
 import { syncService } from '../services/syncService';
 import { trueLayerService, BankAccount, Balance } from '../services/trueLayerService';
 import { cacheService } from '../services/cacheService';
+import COLORS from '../constants/colors';
+import Icon from 'react-native-vector-icons/MaterialIcons';
+import { SessionTimeoutWrapper } from '../hooks/SessionTimeoutWrapper';
 
 type DashboardScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Dashboard'>;
 
@@ -33,9 +37,9 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
   const [totalBalance, setTotalBalance] = useState(0);
   const [currency, setCurrency] = useState('GBP');
   const [isLoading, setIsLoading] = useState(true);
-  const [loadAttempts, setLoadAttempts] = useState(0);
+  const loadAttemptsRef = useRef(0);
 
-  // Enhanced account loading with retry logic
+  // Load account with retry
   const checkTokensAndLoadAccounts = async () => {
     try {
       setIsLoading(true);
@@ -86,7 +90,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
             setCurrency(firstBalance.currency);
           }
           
-          // Show a message that we're using cached data
+          // Show a message that: using cached data
           Alert.alert(
             'Using Cached Data',
             'Unable to connect to the bank. Showing your last synced accounts.',
@@ -96,34 +100,34 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
           // If there's a specific error about connecting a bank, navigate to ConnectBank
           navigation.navigate('ConnectBank');
         } else {
-          // No cached data and not a "connect bank" error
-          if (loadAttempts < 2) {
-            // Try one more time after a delay
-            setTimeout(() => {
-              setLoadAttempts(prev => prev + 1);
-              checkTokensAndLoadAccounts();
-            }, 2000);
-          } else {
-            // After retries, show an error
-            Alert.alert(
-              'Connection Error',
-              'Could not load your accounts. Please try again later.',
-              [
-                { 
-                  text: 'Try Again', 
-                  onPress: () => {
-                    setLoadAttempts(0);
-                    checkTokensAndLoadAccounts();
+            // No cached data and not a "connect bank" error
+            if (loadAttemptsRef.current < 2) {
+              // Try one more time after a delay
+              setTimeout(() => {
+                loadAttemptsRef.current += 1;
+                checkTokensAndLoadAccounts();
+              }, 2000);
+            } else {
+              // After retries, show an error
+              Alert.alert(
+                'Connection Error',
+                'Could not load your accounts. Please try again later.',
+                [
+                  {
+                    text: 'Try Again',
+                    onPress: () => {
+                      loadAttemptsRef.current = 0;
+                      checkTokensAndLoadAccounts();
+                    }
+                  },
+                  {
+                    text: 'Connect Bank',
+                    onPress: () => navigation.navigate('ConnectBank')
                   }
-                },
-                { 
-                  text: 'Connect Bank', 
-                  onPress: () => navigation.navigate('ConnectBank')
-                }
-              ]
-            );
-          }
-        }
+                ]
+              );
+            }
+            }
       }
     } catch (error: any) {
       console.error('Error in checkTokensAndLoadAccounts:', error);
@@ -164,24 +168,33 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#1a73e8" />
+        <ActivityIndicator size="large" color={COLORS.primary} />
         <Text style={styles.loadingText}>Loading accounts...</Text>
       </View>
     );
   }
 
   return (
+    <SessionTimeoutWrapper>
     <View style={styles.container}>
       <View style={styles.header}>
         <View>
           <Text style={styles.welcomeText}>Welcome back,</Text>
-          <Text style={styles.userName}>{user?.displayName || 'User'}</Text>
+          <Text style={styles.userName}>{user?.displayName || ' '}</Text>
         </View>
         <View style={styles.headerButtons}>
-          <TouchableOpacity onPress={() => navigation.navigate('Profile')}>
+          <TouchableOpacity 
+            style={styles.profileButtonContainer}
+            onPress={() => navigation.navigate('Profile')}
+          >
+            <Icon name="person" size={18} color={COLORS.primary} />
             <Text style={styles.profileButton}>Profile</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={handleLogout}>
+          <TouchableOpacity 
+            style={styles.logoutButtonContainer}
+            onPress={handleLogout}
+          >
+            <Icon name="logout" size={18} color={COLORS.error} />
             <Text style={styles.logoutButton}>Logout</Text>
           </TouchableOpacity>
         </View>
@@ -203,12 +216,17 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Your Accounts</Text>
             <TouchableOpacity onPress={() => navigation.navigate('ConnectBank')}>
-              <Text style={styles.addButton}>+ Add</Text>
+              <Text style={styles.addButton}>Connect Bank</Text>
             </TouchableOpacity>
           </View>
 
           {accounts.length === 0 ? (
             <View style={styles.emptyState}>
+              <Image 
+                source={require('../../assets/banks/blogo.png')}
+                style={styles.emptyStateIcon}
+                resizeMode="contain"
+              />
               <Text style={styles.emptyStateText}>
                 You don't have any connected accounts yet.
               </Text>
@@ -239,7 +257,7 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
                   <View style={styles.accountBalance}>
                     {typeof account.balance.available === 'number' && (
                       <>
-                        <Text style={styles.balanceAmount}>
+                        <Text style={styles.accountBalanceAmount}>
                           {formatCurrency(account.balance.available, account.balance.currency)}
                         </Text>
                         <Text style={styles.balanceType}>Available</Text>
@@ -259,35 +277,46 @@ const DashboardScreen: React.FC<DashboardScreenProps> = ({ navigation }) => {
             style={styles.actionButton}
             onPress={() => navigation.navigate('Payment')}
           >
+            <Icon name="payment" size={20} color={COLORS.white} style={styles.actionButtonIcon} />
             <Text style={styles.actionButtonText}>Make a Payment</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
+          {/* <TouchableOpacity
             style={[styles.actionButton, styles.secondaryButton]}
             onPress={() => navigation.navigate('Accounts')}
           >
+            <Icon name="account-balance" size={20} color={COLORS.primary} style={styles.actionButtonIcon} />
             <Text style={styles.secondaryButtonText}>View All Accounts</Text>
+          </TouchableOpacity> */}
+          
+          <TouchableOpacity
+            style={[styles.actionButton, styles.secondaryButton]}
+            onPress={() => navigation.navigate('Analytics')}
+          >
+            <Icon name="bar-chart" size={20} color={COLORS.primary} style={styles.actionButtonIcon} />
+            <Text style={styles.secondaryButtonText}>View Analytics</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
     </View>
+    </SessionTimeoutWrapper>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: COLORS.lightGray,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
+    backgroundColor: COLORS.white,
   },
   loadingText: {
     marginTop: 10,
-    color: '#5f6368',
+    color: COLORS.gray,
     fontSize: 16,
   },
   header: {
@@ -295,44 +324,61 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 20,
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
     borderBottomWidth: 1,
-    borderBottomColor: '#e1e3e6',
+    borderBottomColor: COLORS.border,
   },
   welcomeText: {
     fontSize: 14,
-    color: '#5f6368',
+    color: COLORS.gray,
   },
   userName: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#202124',
+    color: COLORS.primary,
   },
   headerButtons: {
     flexDirection: 'row',
-  },
-  profileButton: {
-    color: '#1a73e8',
-    marginRight: 15,
-  },
-  logoutButton: {
-    color: '#ea4335',
-  },
-  balanceCard: {
-    backgroundColor: '#1a73e8',
-    padding: 20,
-    margin: 20,
-    borderRadius: 10,
     alignItems: 'center',
   },
+  profileButtonContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 15,
+  },
+  profileButton: {
+    color: COLORS.primary,
+    marginLeft: 5,
+  },
+  logoutButtonContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  logoutButton: {
+    color: COLORS.error,
+    marginLeft: 5,
+  },
+  balanceCard: {
+    backgroundColor: COLORS.primary,
+    padding: 25,
+    margin: 20,
+    borderRadius: 15,
+    alignItems: 'center',
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 5,
+  },
   balanceLabel: {
-    color: '#fff',
+    color: COLORS.white,
     fontSize: 16,
-    marginBottom: 8,
+    marginBottom: 10,
+    opacity: 0.9,
   },
   balanceAmount: {
-    color: '#fff',
-    fontSize: 28,
+    color: COLORS.white,
+    fontSize: 32,
     fontWeight: 'bold',
   },
   accountsSection: {
@@ -347,19 +393,19 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#202124',
+    color: COLORS.text,
   },
   addButton: {
     color: '#1a73e8',
     fontWeight: 'bold',
   },
   emptyState: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
     padding: 30,
-    borderRadius: 10,
+    borderRadius: 15,
     alignItems: 'center',
     marginBottom: 20,
-    shadowColor: '#000',
+    shadowColor: COLORS.black,
     shadowOffset: {
       width: 0,
       height: 2,
@@ -368,30 +414,40 @@ const styles = StyleSheet.create({
     shadowRadius: 3,
     elevation: 3,
   },
+  emptyStateIcon: {
+    width: 80,
+    height: 80,
+    marginBottom: 20,
+  },
   emptyStateText: {
     fontSize: 16,
-    color: '#5f6368',
+    color: COLORS.gray,
     textAlign: 'center',
     marginBottom: 20,
   },
   connectButton: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: COLORS.primary,
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 8,
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   connectButtonText: {
-    color: '#fff',
+    color: COLORS.white,
     fontWeight: 'bold',
   },
   accountCard: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
     padding: 15,
-    borderRadius: 10,
+    borderRadius: 12,
     marginBottom: 15,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    shadowColor: '#000',
+    shadowColor: COLORS.black,
     shadowOffset: {
       width: 0,
       height: 2,
@@ -399,32 +455,41 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 3,
     elevation: 3,
+    borderLeftWidth: 4,
+    borderLeftColor: COLORS.primary,
   },
   accountInfo: {
     flex: 1,
+    paddingLeft: 6,
   },
   accountName: {
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#202124',
+    color: COLORS.text,
     marginBottom: 5,
   },
   accountNumber: {
     fontSize: 14,
-    color: '#5f6368',
+    color: COLORS.gray,
     marginBottom: 5,
   },
   bankName: {
     fontSize: 13,
-    color: '#5f6368',
+    color: COLORS.gray,
   },
   accountBalance: {
     alignItems: 'flex-end',
     justifyContent: 'center',
+    paddingRight: 6,
+  },
+  accountBalanceAmount: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: COLORS.primary,
   },
   balanceType: {
     fontSize: 13,
-    color: '#5f6368',
+    color: COLORS.gray,
     marginTop: 2,
   },
   actionsSection: {
@@ -432,24 +497,34 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   actionButton: {
-    backgroundColor: '#1a73e8',
+    backgroundColor: COLORS.primary,
     paddingVertical: 15,
-    borderRadius: 8,
+    borderRadius: 10,
     alignItems: 'center',
     marginBottom: 12,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    shadowColor: COLORS.black,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  actionButtonIcon: {
+    marginRight: 10,
   },
   actionButtonText: {
-    color: '#fff',
+    color: COLORS.white,
     fontWeight: 'bold',
     fontSize: 16,
   },
   secondaryButton: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.white,
     borderWidth: 1,
-    borderColor: '#1a73e8',
+    borderColor: COLORS.primary,
   },
   secondaryButtonText: {
-    color: '#1a73e8',
+    color: COLORS.primary,
     fontWeight: 'bold',
     fontSize: 16,
   },

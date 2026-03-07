@@ -2,9 +2,8 @@ import * as Keychain from 'react-native-keychain';
 import { logError } from '../utils/errorHandling';
 
 export class SecureStorage {
-  /**
-   * Store a value securely
-   */
+  // Store a value securely
+
   async setItem(key: string, value: string): Promise<boolean> {
     try {
       await Keychain.setGenericPassword(key, value, {
@@ -17,9 +16,8 @@ export class SecureStorage {
     }
   }
   
-  /**
-   * Retrieve a value from secure storage
-   */
+  // Retrieve a value from secure storage
+   
   async getItem(key: string): Promise<string | null> {
     try {
       const credentials = await Keychain.getGenericPassword({
@@ -36,9 +34,8 @@ export class SecureStorage {
     }
   }
   
-  /**
-   * Remove a value from secure storage
-   */
+  // Remove a value from secure storage
+  
   async removeItem(key: string): Promise<boolean> {
     try {
       await Keychain.resetGenericPassword({
@@ -51,9 +48,8 @@ export class SecureStorage {
     }
   }
   
-  /**
-   * Store user credentials for biometric login
-   */
+  // Store user credentials for biometric login
+  
   async storeUserCredentials(email: string, password: string): Promise<boolean> {
     try {
       await Keychain.setGenericPassword(email, password, {
@@ -66,9 +62,8 @@ export class SecureStorage {
     }
   }
   
-  /**
-   * Get stored user credentials
-   */
+  // Get stored user credentials
+  
   async getUserCredentials(): Promise<{ email: string; password: string } | null> {
     try {
       const credentials = await Keychain.getGenericPassword({
@@ -88,9 +83,8 @@ export class SecureStorage {
     }
   }
 
-  /**
-   * Clear stored user credentials
-   */
+  // Clear stored user credentials
+   
   async clearUserCredentials(): Promise<boolean> {
     try {
       await Keychain.resetGenericPassword({

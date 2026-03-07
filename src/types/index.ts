@@ -1,7 +1,6 @@
-// src/types/index.ts
-// Updated with Debug screen and other improvements
-
 import { ParamListBase } from '@react-navigation/native';
+import { FirebaseFirestoreTypes } from '@react-native-firebase/firestore';
+import { Transaction } from 'services/trueLayerService';
 
 export interface User {
   uid: string;
@@ -19,43 +18,60 @@ export interface AuthContextProps {
   resetPassword: (email: string) => Promise<void>;
   authenticateWithBiometrics: () => Promise<boolean>;
   toggleBiometrics: () => Promise<void>;
+  resetSessionTimeout: () => void;
 }
 
-// Define the Account type (adjust this based on your actual data structure)
 export interface Account {
   id: string;
   name: string;
   balance: number;
   currency: string;
-  // Add other properties as needed
+}
+
+export interface UserCategoryRule {
+  pattern: string;                
+  customCategory: string;         
+  createdAt: FirebaseFirestoreTypes.Timestamp;
 }
 
 export interface RootStackParamList extends ParamListBase {
   Login: undefined;
   Register: undefined;
   Dashboard: undefined;
-  ConnectBank: undefined;
+  ConnectBank: { fromAuth?: boolean } | undefined;
   Accounts: undefined;
   TransactionList: { accountId: string };
   Payment: undefined;
-  PaymentConfirmation: { 
-    paymentId: string; 
-    resourceToken: string; 
+  PaymentConfirmation: {
+    paymentId: string;
+    amount: number;
+    recipient: { name: string };
+  };
+  PaymentAuth: {
+    paymentId: string;
+    authUrl: string;
     amount: number;
     recipient: { name: string };
   };
   Profile: undefined;
-  ChangePassword: undefined;
-  LinkedBanks: undefined;
   Analytics: undefined;
-  Debug: undefined; // Added Debug screen
-  
-  // Fix these routes with their proper parameters
-  BankAuth: { 
-    bankId: string; 
+  BankAuth: {
+    bankId: string;
     bankName: string;
   };
-  AccountDetails: { 
-    accounts: Account[];
-  };
+  CategoryManagement: undefined;
+  
+  EditCategory: {
+  type: 'rename' | 'ai';
+  categoryName?: string;
+  pattern?: string;
+  currentCategory?: string;
+  hash?: string;
+};
+
+CategoryTransactions: {
+  categoryName: string;
+  transactions: Transaction[];
+  currency: string;
+};
 }
