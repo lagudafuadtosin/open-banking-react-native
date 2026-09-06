@@ -1,79 +1,57 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Open banking mobile app, React Native and TrueLayer
 
-# Getting Started
+The code from my MSc dissertation at the University of Stirling: *Design and Development of a Fintech Mobile Application Using React Native and TrueLayer Open Banking APIs*, MSc Financial Technology, September 2025. The dissertation itself is in `docs/dissertation.pdf`.
 
->**Note**: Make sure you have completed the [React Native - Environment Setup](https://reactnative.dev/docs/environment-setup) instructions till "Creating a new application" step, before proceeding.
+The question the project set out to answer was simple. Open Banking, through PSD2 and platforms like TrueLayer, promises that a developer can integrate one API and reach every bank. Is that what building an app on it is actually like? The answer, in short: the integration works and the numbers are good, but the gap between the regulatory promise and the development reality is real, and the literature does not cover it.
 
-## Step 1: Start the Metro Server
+## What the app does
 
-First, you will need to start **Metro**, the JavaScript _bundler_ that ships _with_ React Native.
+A React Native 0.72 app that connects to several banks through TrueLayer's sandbox and shows them in one place.
 
-To start Metro, run the following command from the _root_ of your React Native project:
+- Sign in with Firebase Authentication, with biometric verification on the device.
+- Connect bank accounts through TrueLayer's OAuth flow, with deep linking back into the app.
+- One dashboard for all accounts, balances and transaction history.
+- Spending categories with charts, and an AI powered categorisation of transactions that uses a hybrid approach: a keyword pass first, then Google Gemini for what the keywords cannot place, with caching so the same description is never sent twice and rate limiting so the API is not hammered.
+- Payments through TrueLayer, which pivoted to a WebView flow after the native SDK could not be made to build against this React Native version. That pivot is one of the findings.
+- Encrypted local storage for anything sensitive, secure key storage on the device, and an offline cache with a sync service so the app works between connections.
+
+All sixteen objectives set at the start were achieved. The table is in section 4.3 of the dissertation.
+
+## What the evaluation found
+
+- 99% API connection success rate against the TrueLayer sandbox.
+- Authentication in under two seconds.
+- Hands-on usability testing following Nielsen's method. The consolidated view was the thing users valued, and the findings shaped the dashboard.
+- The costs the theory hides: SDK compatibility, build configuration on Android, deep linking, and the time an Open Banking integration really takes before a line of product code is written. Section 5.4 sets these out for anyone about to start a similar build.
+
+## Where things are
+
+```
+src/
+  screens/       fifteen screens: splash, login, register, connect bank, bank auth, dashboard,
+                 transactions, categories, analytics, payments, profile
+  services/      trueLayerService, syncService, cacheService, aiService (categorisation),
+                 encryptionService, secureStorage, biometricService, firebaseService
+  components/    charts, category picker, recategorise modal
+  context/       auth
+  hooks/         session timeout
+  navigation/
+docs/            the dissertation
+```
+
+## Running it
+
+You need the React Native 0.72 toolchain, a TrueLayer sandbox client, and a Firebase project.
 
 ```bash
-# using npm
+npm install
+cp .env.example .env     # fill in your own TrueLayer, Firebase and Gemini values
 npm start
-
-# OR using Yarn
-yarn start
+npm run android          # or npm run ios
 ```
 
-## Step 2: Start your Application
+No keys ship with this repository. `.env` is ignored and `android/app/google-services.json` has to come from your own Firebase project.
 
-Let Metro Bundler run in its _own_ terminal. Open a _new_ terminal from the _root_ of your React Native project. Run the following command to start your _Android_ or _iOS_ app:
+## Licence
 
-### For Android
-
-```bash
-# using npm
-npm run android
-
-# OR using Yarn
-yarn android
-```
-
-### For iOS
-
-```bash
-# using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
-```
-
-If everything is set up _correctly_, you should see your new app running in your _Android Emulator_ or _iOS Simulator_ shortly provided you have set up your emulator/simulator correctly.
-
-This is one way to run your app — you can also run it directly from within Android Studio and Xcode respectively.
-
-## Step 3: Modifying your App
-
-Now that you have successfully run the app, let's modify it.
-
-1. Open `App.tsx` in your text editor of choice and edit some lines.
-2. For **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Developer Menu** (<kbd>Ctrl</kbd> + <kbd>M</kbd> (on Window and Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (on macOS)) to see your changes!
-
-   For **iOS**: Hit <kbd>Cmd ⌘</kbd> + <kbd>R</kbd> in your iOS Simulator to reload the app and see your changes!
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [Introduction to React Native](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you can't get this to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+MIT. Copyright 2025 Fuad Oluwatosin Laguda.
